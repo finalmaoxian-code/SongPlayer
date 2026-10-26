@@ -21,18 +21,37 @@ namespace SongPlayer.Models;
 /// One-based position of the track inside its album, or <see langword="null"/> when the tag
 /// does not carry one.
 /// </param>
+/// <param name="StreamKey">
+/// Stable identity of an online source, e.g. <c>bilibili:BV1GJ411x7h7</c>, or
+/// <see langword="null"/> for local files. Unlike <paramref name="StreamUri"/> this never
+/// expires, so it is what an online track is recognised by.
+/// </param>
+/// <param name="StreamUri">
+/// Fully resolved, temporary URL the engine loads for an online source. Bilibili signs these
+/// URLs with a deadline, so this is a snapshot that goes stale and must never be persisted;
+/// it is re-resolved from <paramref name="StreamKey"/> before each playback.
+/// </param>
 public sealed record Track(
     string Title,
     string Artist,
     TimeSpan Duration,
     string? FilePath = null,
     string? Album = null,
-    int? TrackNumber = null)
+    int? TrackNumber = null,
+    string? StreamKey = null,
+    string? StreamUri = null)
 {
     /// <summary>
-    /// True when the track is backed by a real file rather than placeholder data.
+    /// True when the track can be handed to the audio engine, either as a file on disk or as an
+    /// already-resolved online stream.
     /// </summary>
-    public bool IsPlayable => !string.IsNullOrWhiteSpace(FilePath);
+    public bool IsPlayable =>
+        !string.IsNullOrWhiteSpace(FilePath) || !string.IsNullOrWhiteSpace(StreamUri);
+
+    /// <summary>
+    /// True when the track comes from an online source rather than a file on disk.
+    /// </summary>
+    public bool IsStream => !string.IsNullOrWhiteSpace(StreamKey);
 
     /// <summary>
     /// Track length as <c>m:ss</c>, ready for the library table.

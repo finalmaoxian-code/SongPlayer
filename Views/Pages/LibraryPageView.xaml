@@ -8,6 +8,7 @@
     <Grid Visibility="{Binding IsLibrarySelected, Converter={StaticResource BoolToVisibility}}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -50,9 +51,61 @@
             </StackPanel>
         </Grid>
 
+        <!--
+            Bilibili input. It sits in the toolbar rather than in the empty state because the
+            empty state disappears after the first import, and online playback has to stay
+            reachable once a local library exists.
+        -->
+        <Grid Grid.Row="1" Margin="0,0,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+                VerticalAlignment="Center"
+                Text="{Binding Bilibili.StatusMessage}"
+                TextTrimming="CharacterEllipsis"
+                FontSize="{StaticResource FontSizeCaption}">
+                <TextBlock.Style>
+                    <Style BasedOn="{StaticResource CaptionTextStyle}" TargetType="TextBlock">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Bilibili.HasError}" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource CaptionCloseHoverBrush}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <StackPanel
+                Grid.Column="1"
+                Orientation="Horizontal"
+                VerticalAlignment="Center">
+                <TextBox
+                    Width="200"
+                    VerticalContentAlignment="Center"
+                    IsEnabled="{Binding Bilibili.IsBusy, Converter={StaticResource InverseBoolToBoolean}}"
+                    Style="{StaticResource SearchBoxStyle}"
+                    Text="{Binding Bilibili.Bvid, UpdateSourceTrigger=PropertyChanged}"
+                    ToolTip="Bilibili video id, e.g. BV1GJ411x7h7">
+                    <TextBox.InputBindings>
+                        <KeyBinding Key="Return" Command="{Binding Bilibili.PlayCommand}" />
+                    </TextBox.InputBindings>
+                </TextBox>
+                <Button
+                    Margin="8,0,0,0"
+                    Content="Play BV…"
+                    Command="{Binding Bilibili.PlayCommand}"
+                    IsEnabled="{Binding Bilibili.IsBusy, Converter={StaticResource InverseBoolToBoolean}}"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    ToolTip="Resolve the audio stream through the local bridge and play it" />
+            </StackPanel>
+        </Grid>
+
         <!-- Track table -->
         <Border
-            Grid.Row="1"
+            Grid.Row="2"
             Margin="0,0,0,4"
             Visibility="{Binding Library.HasTracks, Converter={StaticResource BoolToVisibility}}"
             Style="{StaticResource CardStyle}">
@@ -139,7 +192,7 @@
 
         <!-- Empty library state -->
         <Border
-            Grid.Row="1"
+            Grid.Row="2"
             Margin="0,0,0,4"
             Visibility="{Binding Library.HasNoTracks, Converter={StaticResource BoolToVisibility}}"
             Style="{StaticResource CardStyle}">

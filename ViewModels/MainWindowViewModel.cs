@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
 using SongPlayer.Services.Audio;
+using SongPlayer.Services.Bilibili;
 using SongPlayer.Services.Library;
 using SongPlayer.Services.Lyrics;
 using SongPlayer.Services.Storage;
@@ -38,6 +39,7 @@ public partial class MainWindowViewModel : ObservableObject
             new SampleLyricProvider(),
             CreateDesignTimeLibrary(),
             new FolderPicker(),
+            new BilibiliBridgeClient(),
             audioPlayer: null)
     {
     }
@@ -58,6 +60,7 @@ public partial class MainWindowViewModel : ObservableObject
     /// <param name="lyricProvider">Source of the timed lyrics shown on the Now Playing overlay.</param>
     /// <param name="library">Library facade behind the Local Music page.</param>
     /// <param name="folderPicker">Picker used by the import command.</param>
+    /// <param name="bilibiliSource">Bridge client behind the Bilibili input.</param>
     /// <param name="audioPlayer">
     /// Engine that executes the transport commands, or <c>null</c> to keep the transport purely
     /// visual.
@@ -66,6 +69,7 @@ public partial class MainWindowViewModel : ObservableObject
         ILyricProvider lyricProvider,
         IMusicLibraryService library,
         IFolderPicker folderPicker,
+        IBilibiliSource bilibiliSource,
         IAudioPlayer? audioPlayer = null)
     {
         PlayerBar = audioPlayer is null
@@ -78,8 +82,17 @@ public partial class MainWindowViewModel : ObservableObject
         Library = new LibraryPageViewModel(library, folderPicker);
         Library.TrackActivated += OnLibraryTrackActivated;
 
+        Bilibili = new BilibiliViewModel(bilibiliSource);
+        Bilibili.TrackResolved += OnBilibiliTrackResolved;
+
         PlayerBar.PropertyChanged += OnPlayerBarPropertyChanged;
+        PlayerBar.PlaybackFailed += OnPlayerBarPlaybackFailed;
     }
+
+    /// <summary>
+    /// Bilibili input shown in the Local Music toolbar.
+    /// </summary>
+    public BilibiliViewModel Bilibili { get; }
 
     /// <summary>
     /// Tracks imported into the local library, shown by the Local Music page.
@@ -262,6 +275,53 @@ public partial class MainWindowViewModel : ObservableObject
         PlayerBar.LoadTrack(track);
         CurrentPage = PlayerPage.Library;
     }
+
+    /// <summary>
+    /// Plays a stream that the Bilibili input just resolved.
+    /// </summary>
+    /// <remarks>
+    /// Starting playback immediately is the right default here: the user pressed a button labelled
+    /// "Play", unlike a library row selection, which only loads the track.
+    /// </remarks>
+    private void OnBilibiliTrackResolved(object? sender, Track track)
+    {
+        _refreshedStreamKey = null;
+        PlayerBar.PlayTrack(track);
+        CurrentPage = PlayerPage.Library;
+    }
+
+    /// <summary>
+    /// Retries an online track once when its stream could not be played.
+    /// </summary>
+    /// <param name="sender">Player bar that failed.</param>
+    /// <param name="track">Track the engine gave up on.</param>
+    /// <remarks>
+    /// Bilibili signs CDN URLs with a deadline, so a link saved from an earlier session — or one
+    /// that simply aged out while the user was listening — is dead by design. Re-resolving is the
+    /// only honest fix, and it is attempted once per track so a genuinely broken video does not
+    /// spin in a retry loop.
+    /// </remarks>
+    private async void OnPlayerBarPlaybackFailed(object? sender, Track track)
+    {
+        if (!track.IsStream || track.StreamKey == _refreshedStreamKey)
+        {
+            return;
+        }
+
+        _refreshedStreamKey = track.StreamKey;
+
+        Track? refreshed = await Bilibili.TryRefreshAsync(track);
+
+        if (refreshed is not null)
+        {
+            PlayerBar.PlayTrack(refreshed);
+        }
+    }
+
+    /// <summary>
+    /// Stream key whose refresh was already attempted, so a failure cannot repeat forever.
+    /// </summary>
+    private string? _refreshedStreamKey;
 
     /// <summary>
     /// Refreshes every property derived from <see cref="CurrentPage"/>.

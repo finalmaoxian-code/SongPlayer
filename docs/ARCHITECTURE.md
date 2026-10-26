@@ -39,9 +39,9 @@ unimplemented controls are visibly disabled.
 | --- | --- |
 | UI framework | WPF, `net10.0-windows`, `UseWPF=true` |
 | Language settings | `Nullable=enable`, `ImplicitUsings=enable` |
-| Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0 |
-| C# source | 38 files, 3,276 lines (33% comment lines) |
-| XAML | 17 files, 1,958 lines |
+| Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0, `LibVLCSharp` 3.10.2, `VideoLAN.LibVLC.Windows` 3.0.24 |
+| C# source | 43 files, 4,105 lines (33% comment lines) |
+| XAML | 17 files, 2,011 lines |
 | Window | 1180×760 default, 900×600 minimum, borderless with a custom caption |
 | Theme | Dark only, token-driven |
 | Build status | `dotnet build` → 0 warnings, 0 errors |
@@ -88,7 +88,8 @@ SongPlayer/
 │   ├── MainWindowViewModel.cs         │  LAYER 3 — Presentation state
 │   ├── Shell/                         │  (all UI state + commands;
 │   │   ├── PlayerBarViewModel.cs      │   MainWindowViewModel mediates between
-│   │   └── NowPlayingViewModel.cs     │   the two child view models)
+│   │   ├── BilibiliViewModel.cs       │   the child view models)
+│   │   └── NowPlayingViewModel.cs     │
 │   └── LyricLineViewModel.cs          │
 │                                      ─┘
 ├── Models/                           ─┐
@@ -99,7 +100,13 @@ SongPlayer/
 ├── Services/                         ─┐
 │   ├── Audio/                         │  LAYER 5 — Services
 │   │   ├── IAudioPlayer.cs            │  (interfaces + implementations;
-│   │   └── MediaPlayerAudioPlayer.cs  │   no view, no WPF types)
+│   │   └── LibVlcAudioPlayer.cs       │   no view, no WPF types)
+│   ├── Bilibili/                      │
+│   │   ├── IBilibiliSource.cs         │
+│   │   ├── BilibiliBridgeClient.cs    │
+│   │   ├── BilibiliSourceException.cs │
+│   │   ├── DashSegmentProbe.cs        │
+│   │   └── ResolvedAudio.cs           │
 │   ├── Library/                       │
 │   │   ├── IMusicLibraryService.cs    │
 │   │   ├── MusicLibraryService.cs     │
@@ -234,13 +241,13 @@ Avoids a `Style`/`DataTrigger` boilerplate for every "show this when X" case.
 
 ### 4.3 Layer 3 — Presentation state (`ViewModels/`)
 
-Five view models. The shell composes the player children and the library page and is the
-only type that knows more than one of them; the children never reference each other or their
-parent (§7.11). All use
+Six view models. The shell composes the player children, the library page and the Bilibili
+input, and is the only type that knows more than one of them; the children never reference each
+other or their parent (§7.11). All use
 `CommunityToolkit.Mvvm` source generators (`[ObservableProperty]`, `[RelayCommand]`), so no
 `INotifyPropertyChanged` boilerplate is written by hand.
 
-**`MainWindowViewModel.cs` (276 lines)** — navigation state plus composition; the mediator.
+**`MainWindowViewModel.cs` (336 lines)** — navigation state plus composition; the mediator.
 
 - **Own state**: `CurrentPage`, `SearchText`, `IsNowPlayingOpen`.
 - **Derived state**: `IsHomeSelected` / `IsLibrarySelected` (settable, see §7.3), `PageTitle`,
@@ -248,16 +255,18 @@ parent (§7.11). All use
 - **Commands**: `ShowLibrary`, `OpenNowPlaying` (gated by `CanOpenNowPlaying`),
   `CloseNowPlaying`, `SeekToLyric(LyricLineViewModel?)`, `ImportFolder` (the Home page CTA; it
   awaits the library command and then navigates, so the scan logic is never duplicated).
-- **Composition**: exposes `PlayerBar`, `NowPlaying` and `Library` as properties, so the views
-  bind *through* them (`{Binding PlayerBar.TrackTitle}`) while the window keeps one
+- **Composition**: exposes `PlayerBar`, `NowPlaying`, `Library` and `Bilibili` as properties,
+  so the views bind *through* them (`{Binding PlayerBar.TrackTitle}`) while the window keeps one
   `DataContext`.
 - **Mediation**: two edges, both one-liners. `OnPlayerBarPropertyChanged` forwards
   `PositionSeconds` → `NowPlaying.UpdateActiveLyric(...)` and `CurrentTrack` →
   `NowPlaying.LoadFor(...)` plus a re-evaluation of `OpenNowPlayingCommand`;
   `OnLibraryTrackActivated` turns a library selection into `PlayerBar.LoadTrack(track)` and a
-  navigation to the library page. Neither child knows the other exists.
+  navigation to the library page. A third edge is recovery: `OnPlayerBarPlaybackFailed`
+  re-resolves an expired Bilibili link once and replays it. Neither child knows the other
+  exists.
 
-**`ViewModels/Shell/PlayerBarViewModel.cs` (421 lines)** — transport plus track metadata, and
+**`ViewModels/Shell/PlayerBarViewModel.cs` (433 lines)** — transport plus track metadata, and
 the single place the playback position is published from.
 
 - **Input state**: `CurrentTrack` (`Track.Sample` by default), `IsPlaying`, `PositionSeconds`,
@@ -278,6 +287,17 @@ the single place the playback position is published from.
   reset *before* the record swap so the seek slider never spans the old and new duration.
 - `TrackAlbum` / `TrackAlbumPosition` read the real tags now, so the overlay says
   "Track 04" only when the file actually carries a track number.
+- `PlaybackFailed` (an event carrying the failed track) exists on top of `StatusMessage`: the
+  message is what the bar displays, the event is what the shell needs in order to retry.
+
+**`ViewModels/Shell/BilibiliViewModel.cs` (177 lines)** — the online source input.
+
+- **State**: `Bvid`, `StatusMessage`, `IsBusy`, `HasError`; `TrackResolved` event.
+- **Commands**: `Play` (probe the bridge → resolve → read the stream duration → raise).
+- **Refresh**: `TryRefreshAsync(Track)` re-resolves a stream whose signed URL expired, reading
+  the video id back out of `Track.StreamKey`.
+- It builds a normal `Track` with `StreamKey` / `StreamUri` set, so online playback is not a
+  second player — it is a track the existing transport already understands (§7.12).
 
 **`ViewModels/Shell/NowPlayingViewModel.cs` (109 lines)** — the karaoke half of the overlay.
 
@@ -311,7 +331,7 @@ rows that change, instead of invalidating the whole list.
 
 | File | Contents |
 | --- | --- |
-| `Track.cs` (66) | `sealed record Track(string Title, string Artist, TimeSpan Duration, string? FilePath = null, string? Album = null, int? TrackNumber = null)` with `IsPlayable`, `DurationText`, `AlbumText` (an em dash when the file has no album tag), plus `Track.Empty` (nothing loaded) and `Track.Sample` ("Midnight Drive" / "The Wanderers" / 3:32) so the player bar is reviewable before the audio engine exists |
+| `Track.cs` (85) | `sealed record Track(string Title, string Artist, TimeSpan Duration, string? FilePath = null, string? Album = null, int? TrackNumber = null, string? StreamKey = null, string? StreamUri = null)` with `IsPlayable` (a local path *or* a stream), `IsStream`, `DurationText`, `AlbumText` (an em dash when the file has no album tag), plus `Track.Empty` and `Track.Sample` so the player bar is reviewable before anything is imported. `StreamKey` is durable identity for de-duplication; `StreamUri` is a temporary signed URL and is never persisted |
 | `PlayerPage.cs` (15) | `enum PlayerPage { Home, Library }` — the overlay is intentionally *not* a member |
 | `LyricLine.cs` (12) | `sealed record LyricLine(TimeSpan Time, string Text)` |
 | `TimeSpanFormatting.cs` (28) | `ToClock(TimeSpan)` → `m:ss` / `h:mm:ss`; one home for the clock format instead of a private helper per view model |
@@ -330,7 +350,7 @@ depend on.
 | --- | ---: | --- |
 | `IMusicLibraryService.cs` | 31 | Contract: `ScanAsync` / `LoadAsync` / `SaveAsync` |
 | `MusicLibraryService.cs` | 79 | Orchestration only: walks the scanner's output, asks the reader for tags, delegates persistence |
-| `IAudioFileScanner.cs` / `AudioFileScanner.cs` | 24 + 42 | Extension whitelist and `Directory.EnumerateFiles` |
+| `IAudioFileScanner.cs` / `AudioFileScanner.cs` | 24 + 50 | Extension whitelist (mp3, flac, wav, m4a, aac, wma, ogg, opus — the set LibVLC decodes) and `Directory.EnumerateFiles` |
 | `ITrackMetadataReader.cs` / `TrackMetadataReader.cs` | 19 + 81 | TagLibSharp title/artist/duration/album/track number with an explicit exception whitelist, so one corrupt file cannot abort a scan |
 | `LibraryStore.cs` | 78 | `library.json` read/write with a temp-file-then-move atomic write |
 
@@ -343,26 +363,50 @@ scan flow untestable and would drag a UI type into a view model.
 placeholder lines, one every 12 s). This seam exists so an `.lrc` parser drops in without
 touching a view or a view model.
 
-**`Audio/` (435 lines)** — `IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`,
+**`Audio/` (512 lines)** — `IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`,
 `Seek`, plus `PositionChanged` / `PlaybackEnded` / `PlaybackFailed`) and
-`MediaPlayerAudioPlayer`, the real engine: a `System.Windows.Media.MediaPlayer` wrapped so the
-view models never see a WPF media type. Three details carry the design:
+`LibVlcAudioPlayer`, the real engine: `LibVLCSharp`'s `MediaPlayer` wrapped so no view model
+ever sees an engine type. Four details carry the design:
 
-- **The engine owns the playhead.** A 250 ms `DispatcherTimer` samples
-  `MediaPlayer.Position` and publishes it; `PlayerBarViewModel` marks those assignments so they
-  are never echoed back as seeks. A second user seek would fight the clock, so the write path
-  is one-directional per source.
-- **Seeks are coalesced to 10/s.** A `SlimSlider` drag produces a seek per pixel, and each one
-  flushes `MediaPlayer`'s buffer; the engine parks the requested position in
-  `_pendingPosition` and applies it on a 100 ms timer instead. A position is also applied
-  immediately on `MediaOpened`, because a resume point has to exist before the first frame.
-- **Failures are values, not exceptions.** `MediaFailed`, a missing `FilePath` and a file that
-  vanished from disk all raise `PlaybackFailed` with a sentence; `PlayerBarViewModel` turns it
-  into `StatusMessage`, which the player bar shows in place of the artist line. The shell has
-  no toast layer, and the bar is where the user just clicked.
+- **The engine owns the playhead.** A 250 ms `DispatcherTimer` samples `MediaPlayer.Time` and
+  publishes it; `PlayerBarViewModel` marks those assignments so they are never echoed back as
+  seeks. LibVLC's own `TimeChanged` event is deliberately *not* used: it fires on a native
+  thread, and routing it to the UI would force every subscriber to marshal. Polling keeps the
+  contract single-threaded and identical to what the previous engine offered.
+- **Seeks are coalesced to 10/s.** A `SlimSlider` drag produces a seek per pixel and each one
+  makes LibVLC flush its buffer; the engine parks the requested position in `_pendingPosition`
+  and applies it on a 100 ms timer. `IsSeekable == false` (a stream LibVLC cannot index) turns
+  a seek into a no-op instead of an exception.
+- **Failures are values, not exceptions.** A missing `FilePath`, a file that vanished from
+  disk, a rejected `Play` and LibVLC's `EncounteredError` all raise `PlaybackFailed` with a
+  sentence; `PlayerBarViewModel` turns it into `StatusMessage`, which the player bar shows in
+  place of the artist line. The shell has no toast layer, and the bar is where the user just
+  clicked.
+- **One engine for files and streams.** `Track.FilePath` and `Track.StreamUri` both become a
+  media source; the only difference is that a stream additionally gets
+  `:http-referrer=https://www.bilibili.com/`, a browser user agent and
+  `:network-caching=1500`. The native callbacks (`EndReached`, `EncounteredError`) arrive on
+  LibVLC's thread and are marshalled back through the captured `Dispatcher`.
 
-`MediaPlayer` has UI-thread affinity and is created in `App.OnStartup`, which is also why
-`App.OnExit` disposes it — an open media keeps a WASAPI stream alive (§7.10).
+Both LibVLC objects have UI-thread affinity and are created in `App.OnStartup`, which is also
+why `App.OnExit` disposes them — an open media keeps the audio output device alive (§7.10).
+
+**`Bilibili/` (449 lines)** — the online source, kept behind one interface so nothing else in
+the app knows Bilibili exists.
+
+| File | Lines | Responsibility |
+| --- | ---: | --- |
+| `IBilibiliSource.cs` | 31 | `ProbeAsync()` / `ResolveAsync(bvid)` |
+| `BilibiliBridgeClient.cs` | 115 | Talks to the local Node bridge on `127.0.0.1:39271`; validates the id, maps every failure to a sentence, never persists the URL |
+| `DashSegmentProbe.cs` | 292 | Reads the real duration out of the stream's `sidx` box |
+| `BilibiliSourceException.cs` | 30 | Carries a message written for the user |
+| `ResolvedAudio.cs` | 11 | `(Bvid, AudioUri)` pair |
+
+Two of those decisions are worth stating. The bridge is probed *before* resolving, so a bridge
+that is not running says "start it with node bridge.cjs" instead of surfacing a 20-second
+timeout. And the duration is read from a 16 KB ranged request rather than from the player: a
+Bilibili segment is a fragmented MP4 whose `mvhd` declares `duration = 0`, so without reading
+`sidx` an online track would show `00:00` and a seek slider with no range.
 
 ### 4.6 Layer 6 — Platform interop (`Interop/`)
 
@@ -398,6 +442,15 @@ borderless window is maximized (see §7.5).
                      (ListBox selection)            (event)            ├─► PlayerBar.LoadTrack(track)
                                                                        └─► CurrentPage = Library
 
+   paste BV id ──► Bilibili.PlayCommand ──► IBilibiliSource
+                     (IsBusy gate)            ├─► ProbeAsync  ("/health" - no bridge, no 20 s wait)
+                                              ├─► ResolveAsync ("/resolve?bvid=" to a signed .m4s URL)
+                                              └─► DashSegmentProbe (ranged GET, sidx, duration)
+                                                     └─► Track (StreamKey "bilibili:BV...", StreamUri)
+                                                          └─► TrackResolved ──► MainWindowViewModel
+                                                                                ├─► PlayerBar.PlayTrack
+                                                                                └─► CurrentPage = Library
+
    engine clock ──► IAudioPlayer.PositionChanged ──► PlayerBar.PositionSeconds (guarded)
                                                           (or: drag seek, same property)
    drag seek ──► PlayerBar.PositionSeconds ──┬─► IAudioPlayer.Seek (drag release only)
@@ -407,6 +460,11 @@ borderless window is maximized (see §7.5).
                                                    └─► NowPlaying.UpdateActiveLyric
                                                          ├─► LyricLineViewModel.IsActive ──► DataTrigger
                                                          └─► ActiveLyricIndex ──► code-behind BringIntoView
+
+   engine failure ──► IAudioPlayer.PlaybackFailed ──► PlayerBar.StatusMessage ──► red line in the bar
+                                                 └─► PlayerBar.PlaybackFailed ──► MainWindowViewModel
+                                                       (stream only, once)   └─► Bilibili.TryRefreshAsync
+                                                                                   └─► PlayerBar.PlayTrack
 
    click lyric row ──► (NowPlayingView code-behind) MainWindowViewModel.SeekToLyricCommand(line)
                           └─► PlayerBar.PositionSeconds (see above)
@@ -453,11 +511,13 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Lyric sheet with karaoke highlight | ✅ | `ViewModels/Shell/NowPlayingViewModel.cs`, `Themes/NowPlaying.xaml` | Highlight logic is real, driven by `PositionSeconds` |
 | Click a lyric line to seek | ✅ | `Views/Overlays/NowPlayingView.xaml.cs` + `MainWindowViewModel` | |
 | Custom-drawn slider (seek + volume) | ✅ | `Controls/SlimSlider.cs` | Click, drag, hover thumb |
-| Play / pause | ✅ | `PlayerBarViewModel.TogglePlayback` → `MediaPlayerAudioPlayer` | Glyph follows `IsPlaying`, which follows the engine |
-| Playback position advancing | ✅ | `Services/Audio/MediaPlayerAudioPlayer.cs` | 250 ms clock into `PositionSeconds`; the lyric highlight and both labels follow it |
+| Play / pause | ✅ | `PlayerBarViewModel.TogglePlayback` → `LibVlcAudioPlayer` | Glyph follows `IsPlaying`, which follows the engine |
+| Playback position advancing | ✅ | `Services/Audio/LibVlcAudioPlayer.cs` | 250 ms poll of `MediaPlayer.Time` into `PositionSeconds`; the lyric highlight and both labels follow it |
 | Search filtering | ⛔ | `MainWindowViewModel.SearchText` | Box is bound but nothing consumes the text |
 | Library scanning / import folder | ✅ | `ViewModels/Pages/LibraryPageViewModel.cs` + `Services/Library/` | Folder picker → recursive scan → tag read → dedupe → `library.json`; both "Import folder" buttons are live |
-| Audio decoding & output | ✅ | `Services/Audio/MediaPlayerAudioPlayer.cs` | WPF `MediaPlayer`; mp3/wav/wma/m4a/aac. FLAC is excluded from the scanner because Windows only decodes it with the optional media feature pack |
+| Audio decoding & output | ✅ | `Services/Audio/LibVlcAudioPlayer.cs` | LibVLC 3.0.24 through `LibVLCSharp`; mp3/flac/wav/m4a/aac/wma/ogg/opus, plus HTTP streams |
+| Online source: Bilibili BV id to audio | ✅ | `ViewModels/Shell/BilibiliViewModel.cs` + `Services/Bilibili/` | Needs the local Node bridge on `127.0.0.1:39271`; the signed URL is resolved per play request and never stored |
+| Expired stream URL re-resolved once | ✅ | `MainWindowViewModel.OnPlayerBarPlaybackFailed` | A CDN link that rejects the request is re-resolved and replayed once per play request, then reported |
 | Tag reading | ✅ | `Services/Library/TrackMetadataReader.cs` | Title/artist/duration/album/track number feed both the table and the player bar; cover art is still an `ArtworkGlyph` |
 | `.lrc` parsing | ⛔ | `Services/Lyrics/` | `ILyricProvider` is the swap-in point |
 | Playlists | ⛔ | — | Nav entry disabled |
@@ -465,10 +525,10 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Favourites, recently played, shuffle, repeat, next | ⛔ | — | Buttons disabled; `next` says why in its tooltip |
 | Settings / persistence | ⛔ | — | Nothing is written to disk |
 
-Rough measure of "how much is real": **all of the presentation layer and all of the
-interaction logic that does not require media files** — i.e. roughly 70% of the code in the
-repository — is complete and verified. The remaining 30% is a media backend that has not been
-started, and it is fenced off behind clear seams (§9).
+Rough measure of "how much is real": **the whole loop a listener touches** — import, browse,
+play, seek, pause, volume and online playback — is complete and verified. What is still missing
+is what a *library* needs rather than what a *player* needs: a queue, search, `.lrc` lyrics,
+artwork and anything that survives an online link expiring (§8).
 
 ---
 
@@ -563,21 +623,23 @@ missing feature into a bug report.
 ### 7.10 The composition root is hand-written
 
 `App.xaml.cs` builds `AudioFileScanner`, `TrackMetadataReader`, `LibraryStore`,
-`MusicLibraryService`, `FolderPicker`, `MediaPlayerAudioPlayer` and `SampleLyricProvider`, then
-hands the services and `IAudioPlayer` to `MainWindowViewModel` and wraps that in `MainWindow`.
+`MusicLibraryService`, `FolderPicker`, `BilibiliBridgeClient`, `LibVlcAudioPlayer` and
+`SampleLyricProvider`, then hands the services, `IBilibiliSource` and `IAudioPlayer` to
+`MainWindowViewModel` and wraps that in `MainWindow`.
 It then `await`s `Library.RestoreAsync()` *after* `Show()`, so a slow disk never delays the
 first frame. `App.xaml` no
 longer declares `StartupUri`, so the window is created after the services exist, and
 `MainWindow.xaml` carries only a `d:DataContext` design instance. **Why not DI:** the object
-graph is six types deep and has no scopes, lifetimes or configurability to speak of; a
+graph is eight types deep and has no scopes, lifetimes or configurability to speak of; a
 container would add a package, a registration file and a runtime indirection floor to save
 about ten lines of explicit `new`. And because every construction site names a concrete type,
 swapping the audio engine really was one line in one place — which is the actual reason for
 having a composition root here.
 
-`App` also keeps the engine as a field and disposes it in `OnExit`: the `MediaPlayer` inside
-holds a WASAPI stream open until it is closed, so the object graph's owner is the only place
-that can release it in the right order.
+`App` also keeps the engine as a field and disposes it in `OnExit`: LibVLC keeps an audio
+output device and a native plugin host open until they are released, so the object graph's
+owner is the only place that can dispose them in the right order — a view-model `Dispose` would
+run after the window is gone but before the message loop stops.
 
 Two deliberate consequences: the view models never call `new` on a service (they take
 interfaces), and the parameterless `MainWindowViewModel()` overload still exists but only for
@@ -596,6 +658,23 @@ mediator that already owns both lifetimes, keeps the graph acyclic and disposabl
 `CommunityToolkit.Mvvm`'s `WeakReferenceMessenger` was the alternative; it was rejected
 because for exactly one message type it trades a greppable method for a hidden publish site.
 
+### 7.12 Online audio is a source, not a second player
+
+An online track is an ordinary `Track` with `StreamUri` set instead of `FilePath`; nothing
+above `IAudioPlayer` knows where the bytes come from. **Why:** the obvious alternative — a
+separate online engine with its own timer, its own `IsPlaying` and its own position, which is
+what most copy-paste integrations look like — puts two writers on `PositionSeconds` and two
+owners on the play button. The whole point of the `_isApplyingEnginePosition` / `IsSeeking`
+guards (§5) is that exactly one thing owns the playhead; a second engine would have forced a
+second set of guards in a second class.
+
+Two consequences are deliberate. The duration is read from the stream's `sidx` box *before*
+playing, because the seek slider derives its range from `Track.Duration` and a fragmented MP4
+declares none in `mvhd`; and `StreamKey` (`bilibili:BV...`) is the durable identity while
+`StreamUri` is thrown away, because a signed CDN URL expires within hours and persisting it
+would produce a library of dead rows. Expiry is handled where it surfaces: a failed play of a
+stream re-resolves the key once and replays, and a second failure is reported as text.
+
 ---
 
 ## 8. Known limitations
@@ -603,9 +682,14 @@ because for exactly one message type it trades a greppable method for a hidden p
 - **Playback is one track at a time.** There is no queue: finishing a track stops at its end,
   and the left transport button restarts the current track instead of going back in history
   (§4.5). Shuffle, repeat and next need a queue before they can mean anything.
-- **FLAC is not importable.** The engine is WPF `MediaPlayer`, which decodes mp3/wav/wma/m4a/
-  aac but only reads FLAC when the optional Windows media feature pack is installed, so the
-  scanner leaves `.flac` out rather than importing rows that fail on the first click.
+- **Online playback needs a second process.** Bilibili audio comes through the Node bridge in
+  the sibling `SongPlayer.SourceLab` project; if it is not running, the page says so and local
+  playback is unaffected. SongPlayer does not speak the Bilibili API itself.
+- **Streams cannot be saved.** An online track lives only for the current session: it is not
+  written to `library.json` (only `FilePath` is persisted) and has no lyrics, artwork or album,
+  so reopening the app loses it.
+- **An unindexable stream has no seek range.** `sidx` gives the length for a normal Bilibili
+  segment; a source that omits it shows `00:00` and a slider the engine refuses to move.
 - **The library is real but shallow.** Import, persistence and the track table work, yet there
   is no search over it, no sort, no per-track removal (only `Clear library`), no progress report
   for a very large folder, and no duplicate detection beyond the file path.
@@ -643,11 +727,19 @@ injected into `PlayerBarViewModel`; `OnEnginePlaybackEnded` then asks it for the
 and calls `PlayTrack`, and it becomes the `CanExecute` gate for `next`/`previous`/`shuffle`/
 `repeat`. Nothing in the views changes except the disabled flags on those four buttons.
 
-**Swap the engine for FLAC support**
-`IAudioPlayer` is the only contract the view models know. To decode formats `MediaPlayer`
-cannot, write an `NAudio`-backed implementation and construct it in `App.xaml.cs` instead of
-`MediaPlayerAudioPlayer` — then add `.flac` back in `AudioFileScanner`. Two files, no view
-changes.
+**Add a second online source**
+`IBilibiliSource` is shaped for Bilibili only because the bridge is. For a second platform,
+add a sibling interface (or generalise this one to `IMusicSource.ResolveAsync(string id)`),
+implement it next to `BilibiliBridgeClient`, and construct it in `App.xaml.cs`; reuse
+`DashSegmentProbe` if the source serves a fragmented MP4, or let the platform metadata supply
+the duration. `BilibiliViewModel` is the template for the input: one `Play` command that
+probes, resolves and raises `TrackResolved` with an ordinary `Track`.
+
+**Swap the audio engine**
+`IAudioPlayer` is the only contract the view models know, and `MediaPlayerAudioPlayer` (WPF
+`MediaPlayer`) was replaced by `LibVlcAudioPlayer` exactly this way: one new class, one line in
+`App.xaml.cs`, no view and no view-model change. Any replacement only has to report
+`PositionChanged` with the engine's own playhead and never echo a position back as a seek.
 
 **Load real lyrics**
 Implement `ILyricProvider` with an `.lrc` parser that produces `LyricLine` values and construct
@@ -685,6 +777,7 @@ These were checked and are currently clean; they are worth keeping clean:
 | No missing style keys | diff used vs. defined `StaticResource` keys | 0 missing |
 | No dead style keys | same diff, reversed | 0 unused |
 | Binding paths resolve | every `{Binding X}` in `Views/` checked against the view model it inherits | checked manually, not by the compiler — bindings fail at runtime in WPF |
+| Native dependency present | `bin/Debug/net10.0-windows/win-x64/libvlc/win-x64/libvlc.dll` after a build | the project is pinned to `x64` / `win-x64`; `AnyCPU` cannot resolve one native build per architecture |
 | Comments on non-obvious code | comment-line ratio per file | 34% overall; every public type and command documented |
 | Runtime smoke test | launch, navigate every page, open/close the overlay, maximize, seek | passes at 1180×760 and 1920×1032 |
 

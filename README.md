@@ -50,11 +50,13 @@ SongPlayer/
 │  ├─ MainWindowViewModel.cs        Navigation state + mediator between the children
 │  ├─ Shell/PlayerBarViewModel.cs   Track metadata, transport, position (single source)
 │  ├─ Shell/NowPlayingViewModel.cs  Lyrics and the active-line index
+│  ├─ Shell/BilibiliViewModel.cs    BV id input, bridge resolve, retry on an expired link
 │  ├─ Pages/LibraryPageViewModel.cs Import, persistence, track list, selection
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
 ├─ Models/                  Track, PlayerPage, LyricLine, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
-│  ├─ Audio/                IAudioPlayer + MediaPlayerAudioPlayer (real engine)
+│  ├─ Audio/                IAudioPlayer + LibVlcAudioPlayer (LibVLC engine, files and streams)
+│  ├─ Bilibili/             Bridge client, stream URL resolution, fragmented-MP4 duration probe
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
 │  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
 │  └─ Lyrics/               ILyricProvider + sample provider
@@ -74,16 +76,22 @@ SongPlayer/
   buttons and the lyric scrolling live next to the views that own them
   (`Views/CaptionChrome.cs`, `Views/Overlays/NowPlayingView.xaml.cs`). All state is in the view
   models and is exposed with `CommunityToolkit.Mvvm` source generators.
-- **One DataContext, three child view models.** The window is bound to `MainWindowViewModel`,
-  which composes `PlayerBar`, `NowPlaying` and `Library`; views bind through them
-  (`{Binding PlayerBar.TrackTitle}`). No child references another — the shell owns the two
-  edges (position and current track into the overlay, a library selection into the player
-  bar), so the graph stays acyclic and the position has exactly one source.
+- **One DataContext, four child view models.** The window is bound to `MainWindowViewModel`,
+  which composes `PlayerBar`, `NowPlaying`, `Library` and `Bilibili`; views bind through them
+  (`{Binding PlayerBar.TrackTitle}`). No child references another — the shell owns every edge
+  (position and current track into the overlay, a library selection into the player bar, an
+  online resolve into the player bar, a failed stream back into a retry), so the graph stays
+  acyclic and the position has exactly one source.
 - **Services are injected, not constructed by UI code.** `App.xaml.cs` is the only place that
-  names concrete types: it builds the scanner/tag-reader/store facade, an `IAudioPlayer` and an
-  `ILyricProvider` and a folder picker, then hands them to the shell. No DI container — a
-  handful of objects with one lifetime do not justify one. Swapping the audio engine really
-  was a single line there.
+  names concrete types: it builds the scanner/tag-reader/store facade, an `IAudioPlayer`, an
+  `IBilibiliSource`, an `ILyricProvider` and a folder picker, then hands them to the shell. No
+  DI container — a handful of objects with one lifetime do not justify one. Swapping the audio
+  engine (WPF `MediaPlayer` → LibVLC) really was a single line there.
+- **Online audio is a track, not a second player.** A Bilibili stream is a `Track` with
+  `StreamUri` set instead of `FilePath`, so the seek bar, the time labels, the volume and the
+  lyric clock are the same ones local files use. `StreamKey` is what survives (the signed CDN
+  URL expires within hours and is never written to disk), and a stream that fails to load is
+  re-resolved once from that key before the error is shown.
 - **Design tokens first.** Colors, brushes, corner radii and font sizes are declared
   once in `Themes/Colors.xaml`. Views reference tokens rather than literal values, so
   retheming means editing one file. The style dictionaries are split by concern rather than
@@ -115,18 +123,25 @@ SongPlayer/
 ## Status
 
 Import works end to end: **Import folder** picks a directory, recursively scans it for
-`.mp3`/`.wav`/`.m4a`/`.aac`/`.wma`, reads title/artist/duration/album/track number through
-TagLibSharp, de-duplicates by path and writes the index to `%LOCALAPPDATA%\SongPlayer` so the
-Local Music page is populated the next time you start the app. Clicking (or arrow-keying to)
-a row loads it and starts playing it.
+`.mp3`/`.flac`/`.wav`/`.m4a`/`.aac`/`.wma`/`.ogg`/`.opus`, reads title/artist/duration/album/
+track number through TagLibSharp, de-duplicates by path and writes the index to
+`%LOCALAPPDATA%\SongPlayer` so the Local Music page is populated the next time you start the
+app. Clicking (or arrow-keying to) a row loads it and starts playing it.
 
-Playback is real: `MediaPlayerAudioPlayer` wraps WPF's `MediaPlayer`, reports its position
-four times a second, and turns engine failures (missing file, unsupported format, seek error)
-into a visible message in the player bar instead of an exception or a silent no-op. Seeking is
-coalesced to ten requests a second so dragging the bar does not stutter the audio. FLAC is not
-in the importable list because Windows only decodes it with the optional media feature pack.
+Playback is real: `LibVlcAudioPlayer` wraps LibVLC 3.0 (through `LibVLCSharp`, shipped as
+native binaries by `VideoLAN.LibVLC.Windows`), reports the playhead four times a second, and
+turns engine failures (missing file, unsupported format, rejected play, expired stream) into a
+visible message in the player bar instead of an exception or a silent no-op. Seeking is
+coalesced to ten requests a second so dragging the bar does not stutter the audio.
+
+Online playback works: paste a Bilibili BV id into the Local Music toolbar and SongPlayer asks
+the local Node bridge (`127.0.0.1:39271`, from the sibling `SongPlayer.SourceLab` project) for
+the DASH audio URL, reads the real duration out of the stream's `sidx` box, and plays it through
+the same engine and the same transport. The bridge has to be running; the page says so when it
+is not, and local files keep working regardless. The signed URL is never persisted.
 
 There is no queue yet: a track ends where it ends, and the left transport button restarts the
 current track rather than stepping back through history. `.lrc` parsing, cover art, search over
-the library, playlists, a queue with next/shuffle/repeat are the next milestones. Controls
-that are not yet implemented are visibly disabled rather than silently inert.
+the library, playlists, saving online tracks, and a queue with next/shuffle/repeat are the next
+milestones. Controls that are not yet implemented are visibly disabled rather than silently
+inert.

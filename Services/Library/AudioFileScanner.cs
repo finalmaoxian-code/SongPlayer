@@ -17,16 +17,19 @@ public sealed class AudioFileScanner : IAudioFileScanner
     /// Lower-case extensions the player can decode, compared case-insensitively.
     /// </summary>
     /// <remarks>
-    /// FLAC is deliberately not listed: Windows only decodes it when the optional media feature
-    /// pack is installed, so importing it would create library rows that fail on the first click.
+    /// The list matches what LibVLC decodes out of the box, which is why FLAC is included: the
+    /// native engine ships its own decoder instead of relying on the Windows media feature pack.
     /// </remarks>
     private static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".mp3",
+        ".flac",
         ".wav",
         ".m4a",
         ".aac",
         ".wma",
+        ".ogg",
+        ".opus",
     };
 
     /// <inheritdoc />

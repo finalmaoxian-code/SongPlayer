@@ -9,7 +9,7 @@ namespace SongPlayer.Services.Audio;
 /// The view models own the user-facing state (which track is loaded, where the seek slider
 /// points); the player only executes the resulting instructions and reports back what the audio
 /// hardware is actually doing. Keeping the contract this narrow means the views never talk to a
-/// concrete audio API, so <see cref="MediaPlayerAudioPlayer"/> can be swapped for another engine
+/// concrete audio API, so <see cref="LibVlcAudioPlayer"/> can be swapped for another engine
 /// without touching any view or view model.
 /// <para>
 /// The engine is the authority on the playhead once playback starts: it raises

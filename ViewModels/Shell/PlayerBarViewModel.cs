@@ -77,9 +77,19 @@ public partial class PlayerBarViewModel : ObservableObject
     private string? statusMessage;
 
     /// <summary>
-    /// Raised when the engine could not play the loaded track, carrying a message fit for the UI.
+    /// True when there is a failure message to show; bound to the status line visibility.
     /// </summary>
     public bool HasStatusMessage => !string.IsNullOrEmpty(StatusMessage);
+
+    /// <summary>
+    /// Raised when the engine could not play the loaded track, carrying the track that failed.
+    /// </summary>
+    /// <remarks>
+    /// The message itself travels through <see cref="StatusMessage"/>, so the bar can show it
+    /// without anyone listening. The event exists for recovery: an online track whose signed URL
+    /// expired is worth re-resolving once, and only the shell knows how to do that.
+    /// </remarks>
+    public event EventHandler<Track>? PlaybackFailed;
 
     /// <summary>
     /// Track shown in the player bar. <see cref="Track.Empty"/> means nothing is loaded.
@@ -406,6 +416,8 @@ public partial class PlayerBarViewModel : ObservableObject
     {
         IsPlaying = false;
         StatusMessage = message;
+
+        PlaybackFailed?.Invoke(this, CurrentTrack);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Windows;
 using SongPlayer.Services.Audio;
+using SongPlayer.Services.Bilibili;
 using SongPlayer.Services.Library;
 using SongPlayer.Services.Lyrics;
 using SongPlayer.Services.Storage;
@@ -33,12 +34,13 @@ public partial class App : Application
         var metadataReader = new TrackMetadataReader(scanner);
         IMusicLibraryService library = new MusicLibraryService(scanner, metadataReader, new LibraryStore());
         IFolderPicker folderPicker = new FolderPicker();
-        MediaPlayerAudioPlayer audioPlayer = new();
+        IBilibiliSource bilibiliSource = new BilibiliBridgeClient();
+        LibVlcAudioPlayer audioPlayer = new();
         ILyricProvider lyricProvider = new SampleLyricProvider();
 
         _audioPlayer = audioPlayer;
 
-        MainWindowViewModel viewModel = new(lyricProvider, library, folderPicker, audioPlayer);
+        MainWindowViewModel viewModel = new(lyricProvider, library, folderPicker, bilibiliSource, audioPlayer);
 
         MainWindow = new MainWindow { DataContext = viewModel };
         MainWindow.Show();
@@ -52,8 +54,8 @@ public partial class App : Application
     /// Releases the audio device on shutdown.
     /// </summary>
     /// <remarks>
-    /// <see cref="System.Windows.Media.MediaPlayer"/> keeps a WASAPI stream open while it holds a
-    /// media, which would outlive the window if nothing closed it.
+    /// LibVLC holds an audio output device open for as long as the engine exists, which would
+    /// outlive the window if nothing disposed it.
     /// </remarks>
     /// <param name="e">Exit arguments.</param>
     protected override void OnExit(ExitEventArgs e)
@@ -67,5 +69,5 @@ public partial class App : Application
     /// <summary>
     /// Engine instance kept for shutdown; the view models only ever see the interface.
     /// </summary>
-    private MediaPlayerAudioPlayer? _audioPlayer;
+    private LibVlcAudioPlayer? _audioPlayer;
 }
