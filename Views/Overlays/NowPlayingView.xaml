@@ -120,13 +120,28 @@
                                     VerticalAlignment="Center"
                                     Stroke="#1AFFFFFF"
                                     StrokeThickness="1" />
+                                <!--
+                                    Real artwork covers the procedural rings when the track
+                                    carries a thumbnail; the rings and glyph stay behind it as
+                                    the fallback so the frame is never empty.
+                                -->
+                                <Border
+                                    CornerRadius="16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    Visibility="{Binding PlayerBar.HasCover, Converter={StaticResource BoolToVisibility}}">
+                                    <Border.Background>
+                                        <ImageBrush ImageSource="{Binding PlayerBar.CoverImage}" Stretch="UniformToFill" />
+                                    </Border.Background>
+                                </Border>
                                 <TextBlock
                                     Text="{Binding PlayerBar.ArtworkGlyph}"
                                     FontFamily="Segoe MDL2 Assets"
                                     FontSize="68"
                                     Foreground="{StaticResource AccentBrush}"
                                     HorizontalAlignment="Center"
-                                    VerticalAlignment="Center" />
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding PlayerBar.HasNoCover, Converter={StaticResource BoolToVisibility}}" />
                             </Grid>
                         </Border>
                     </Viewbox>
@@ -146,18 +161,36 @@
                             Foreground="{StaticResource AccentBrush}"
                             TextTrimming="CharacterEllipsis" />
 
+                        <!--
+                            Online tracks get a source chip instead of the album chips: the
+                            uploader is not an artist and a video has no album, so printing
+                            "No album" would report a missing field as missing metadata.
+                        -->
                         <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
-                            <Border Style="{StaticResource ChipStyle}">
+                            <Border
+                                Style="{StaticResource ChipStyle}"
+                                Visibility="{Binding PlayerBar.HasAlbumTags, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock
                                     Text="{Binding PlayerBar.TrackAlbumPosition}"
                                     Style="{StaticResource CaptionTextStyle}"
                                     Foreground="{StaticResource TextSecondaryBrush}" />
                             </Border>
-                            <Border Margin="8,0,0,0" Style="{StaticResource ChipStyle}">
+                            <Border
+                                Margin="8,0,0,0"
+                                Style="{StaticResource ChipStyle}"
+                                Visibility="{Binding PlayerBar.HasAlbumTags, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock
                                     Text="{Binding PlayerBar.TrackAlbum}"
                                     Style="{StaticResource CaptionTextStyle}"
                                     Foreground="{StaticResource TextSecondaryBrush}" />
+                            </Border>
+                            <Border
+                                Style="{StaticResource ChipStyle}"
+                                Visibility="{Binding PlayerBar.HasSourceLabel, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock
+                                    Text="{Binding PlayerBar.SourceLabel}"
+                                    Style="{StaticResource CaptionTextStyle}"
+                                    Foreground="{StaticResource AccentBrush}" />
                             </Border>
                         </StackPanel>
                     </StackPanel>
@@ -270,7 +303,9 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock Text="LYRICS" Style="{StaticResource SectionLabelStyle}" />
+                        <TextBlock
+                            Text="{Binding NowPlaying.SectionLabel}"
+                            Style="{StaticResource SectionLabelStyle}" />
 
                         <TextBlock
                             Grid.Column="1"
@@ -284,30 +319,51 @@
                         IsActive, which the item style turns into the accent highlight.
                         Clicking a row seeks through SeekToLyricCommand.
                     -->
-                    <ListBox
-                        x:Name="LyricList"
+                    <Grid Grid.Row="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <ListBox
+                            x:Name="LyricList"
+                            Grid.Row="0"
+                            ItemsSource="{Binding NowPlaying.Lyrics}"
+                            Style="{StaticResource LyricListStyle}"
+                            Visibility="{Binding NowPlaying.HasLyrics, Converter={StaticResource BoolToVisibility}}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- The item template only renders text; padding and
+                                         highlighting come from the container style. -->
+                                    <TextBlock
+                                        Text="{Binding Text}"
+                                        TextWrapping="Wrap"
+                                        VerticalAlignment="Center" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                            <ListBox.ItemContainerStyle>
+                                <!-- Derived from the shared style so the karaoke highlight
+                                     stays in one place, plus the click-to-seek hook. -->
+                                <Style BasedOn="{StaticResource LyricLineStyle}" TargetType="ListBoxItem">
+                                    <EventSetter Event="MouseLeftButtonUp" Handler="LyricLine_MouseLeftButtonUp" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                        </ListBox>
+
+                    <!--
+                        Provenance footer. Subtitles are timed by the uploader or by a speech
+                        model, so the overlay says so instead of implying the song's own words
+                        line up with the highlight.
+                    -->
+                    <TextBlock
                         Grid.Row="1"
-                        ItemsSource="{Binding NowPlaying.Lyrics}"
-                        Style="{StaticResource LyricListStyle}"
-                        Visibility="{Binding NowPlaying.HasLyrics, Converter={StaticResource BoolToVisibility}}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <!-- The item template only renders text; padding and
-                                     highlighting come from the container style. -->
-                                <TextBlock
-                                    Text="{Binding Text}"
-                                    TextWrapping="Wrap"
-                                    VerticalAlignment="Center" />
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                        <ListBox.ItemContainerStyle>
-                            <!-- Derived from the shared style so the karaoke highlight
-                                 stays in one place, plus the click-to-seek hook. -->
-                            <Style BasedOn="{StaticResource LyricLineStyle}" TargetType="ListBoxItem">
-                                <EventSetter Event="MouseLeftButtonUp" Handler="LyricLine_MouseLeftButtonUp" />
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                    </ListBox>
+                        Margin="6,8,6,0"
+                        Text="{Binding NowPlaying.SourceNotice}"
+                        Style="{StaticResource CaptionTextStyle}"
+                        Foreground="{StaticResource TextTertiaryBrush}"
+                        TextWrapping="Wrap"
+                        Visibility="{Binding NowPlaying.HasSourceNotice, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
 
                     <!-- Shown for tracks that carry no lyric data yet -->
                     <StackPanel
@@ -331,7 +387,7 @@
                         <TextBlock
                             Margin="0,14,0,0"
                             HorizontalAlignment="Center"
-                            Text="No lyrics for this track"
+                            Text="{Binding NowPlaying.EmptyTitle}"
                             FontSize="15"
                             FontWeight="SemiBold" />
                         <TextBlock
@@ -339,7 +395,7 @@
                             MaxWidth="320"
                             HorizontalAlignment="Center"
                             TextAlignment="Center"
-                            Text="Add an .lrc file next to the audio file and SongPlayer will follow along."
+                            Text="{Binding NowPlaying.EmptyHint}"
                             Style="{StaticResource BodyTextStyle}" />
                     </StackPanel>
                 </Grid>

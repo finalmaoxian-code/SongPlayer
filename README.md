@@ -61,11 +61,12 @@ SongPlayer/
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
 ├─ Models/                  Track, PlayerPage, LyricLine, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
+│  ├─ Artwork/              CoverImageLoader: downloads and decodes artwork off the UI thread
 │  ├─ Audio/                IAudioPlayer + LibVlcAudioPlayer (LibVLC engine, files and streams)
-│  ├─ Bilibili/             Bridge client, stream URL resolution, fragmented-MP4 duration probe
+│  ├─ Bilibili/             Bridge client, stream URL + metadata resolution, duration probe
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
 │  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
-│  └─ Lyrics/               ILyricProvider + sample provider
+│  └─ Lyrics/               ILyricProvider, TrackLyricProvider, CaptionStore, sample provider
 ├─ Controls/
 │  └─ SlimSlider.cs         Self-drawing seek / volume bar
 ├─ Interop/
@@ -98,6 +99,18 @@ SongPlayer/
   lyric clock are the same ones local files use. `StreamKey` is what survives (the signed CDN
   URL expires within hours and is never written to disk), and a stream that fails to load is
   re-resolved once from that key before the error is shown.
+- **Borrowed metadata is labelled as borrowed.** A video contributes a title, an uploader, a
+  thumbnail, a duration and sometimes a subtitle track, but an uploader is not an artist, a video
+  frame is not an album cover and a subtitle is not a lyric. The player bar prints
+  `Bilibili video · <uploader>`, the overlay swaps the album chips for that source chip, the line
+  sheet is headed `SUBTITLES` rather than `LYRICS` with a note saying where the timing came from,
+  and the empty state names Bilibili's login restriction instead of blaming the video. All of it
+  is derived from `Track.IsStream`, so it cannot drift out of sync with the track it describes.
+- **Artwork is decoded, never bound to a URL.** `CoverImageLoader` fetches the thumbnail with a
+  browser user agent and a `Referrer`, decodes it off the UI thread and hands back a frozen
+  `BitmapImage`; the two artwork frames bind to that. WPF would otherwise fetch an `http` URI on
+  the UI thread, and a broken cover would be able to interrupt playback instead of falling back
+  to the glyph.
 - **Design tokens first.** Colors, brushes, corner radii and font sizes are declared
   once in `Themes/Colors.xaml`. Views reference tokens rather than literal values, so
   retheming means editing one file. The style dictionaries are split by concern rather than
@@ -143,11 +156,16 @@ coalesced to ten requests a second so dragging the bar does not stutter the audi
 Online playback works: paste a Bilibili BV id into the Local Music toolbar and SongPlayer asks
 the local Node bridge (`127.0.0.1:39271`, from the sibling `SongPlayer.SourceLab` project) for
 the DASH audio URL, reads the real duration out of the stream's `sidx` box, and plays it through
-the same engine and the same transport. The bridge has to be running; the page says so when it
-is not, and local files keep working regardless. The signed URL is never persisted.
+the same engine and the same transport. The video's title, uploader and thumbnail come back with
+it: the player bar and the Now Playing overlay show the real cover, and the metadata is labelled
+as a video's rather than a song's. Any subtitle track the bridge could read is archived under
+`%LOCALAPPDATA%\SongPlayer\captions` and replayed through the same karaoke list — Bilibili only
+publishes most subtitle tracks to a signed-in session, so that list is usually empty and the
+overlay says why. The bridge has to be running; the page says so when it is not, and local files
+keep working regardless. The signed URL is never persisted.
 
 There is no queue yet: a track ends where it ends, and the left transport button restarts the
-current track rather than stepping back through history. `.lrc` parsing, cover art, search over
-the library, playlists, saving online tracks, and a queue with next/shuffle/repeat are the next
-milestones. Controls that are not yet implemented are visibly disabled rather than silently
-inert.
+current track rather than stepping back through history. `.lrc` parsing, embedded cover art for
+local files, search over the library, playlists, saving online tracks, and a queue with
+next/shuffle/repeat are the next milestones. Controls that are not yet implemented are visibly
+disabled rather than silently inert.

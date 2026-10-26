@@ -25,11 +25,13 @@ player bar that never competes with the music. Clicking the artwork in the playe
 an immersive **Now Playing** view with the cover art and a lyric sheet, and closing it
 returns to the page you came from.
 
-The project is currently a **polished shell with a working library pipeline**: importing a
-folder really scans the disk, reads tags through TagLibSharp, saves the index to
-`%LOCALAPPDATA%` and lists the tracks with working selection. What is still stubbed is
-playback, `.lrc` parsing and cover art, and nothing in the UI pretends otherwise:
-unimplemented controls are visibly disabled.
+The project is currently a **working player around a shallow library**: importing a folder
+really scans the disk, reads tags through TagLibSharp, saves the index to `%LOCALAPPDATA%` and
+lists the tracks with working selection; audio comes out of LibVLC for both local files and
+Bilibili streams, with a live playhead, seeking, volume and cover art. What is still stubbed is
+the things a *library* needs rather than a *player* needs — a queue, search, playlists,
+`.lrc` parsing and persistence of anything except the track index — and nothing in the UI
+pretends otherwise: unimplemented controls are visibly disabled.
 
 ---
 
@@ -40,8 +42,8 @@ unimplemented controls are visibly disabled.
 | UI framework | WPF, `net10.0-windows`, `UseWPF=true` |
 | Language settings | `Nullable=enable`, `ImplicitUsings=enable` |
 | Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0, `LibVLCSharp` 3.10.2, `VideoLAN.LibVLC.Windows` 3.0.24 |
-| C# source | 43 files, 4,105 lines (33% comment lines) |
-| XAML | 17 files, 2,011 lines |
+| C# source | 47 files, 4,847 lines (34% comment lines) |
+| XAML | 17 files, 2,121 lines |
 | Window | 1180×760 default, 900×600 minimum, borderless with a custom caption |
 | Theme | Dark only, token-driven |
 | Build status | `dotnet build` → 0 warnings, 0 errors |
@@ -95,18 +97,22 @@ SongPlayer/
 ├── Models/                           ─┐
 │   ├── Track.cs                       │  LAYER 4 — Domain data
 │   ├── PlayerPage.cs                  │  (immutable records / enums)
-│   └── LyricLine.cs                   │
+│   ├── LyricLine.cs                   │
+│   └── TimeSpanFormatting.cs          │
 │                                      ─┘
 ├── Services/                         ─┐
 │   ├── Audio/                         │  LAYER 5 — Services
 │   │   ├── IAudioPlayer.cs            │  (interfaces + implementations;
 │   │   └── LibVlcAudioPlayer.cs       │   no view, no WPF types)
+│   ├── Artwork/                       │
+│   │   └── CoverImageLoader.cs        │
 │   ├── Bilibili/                      │
 │   │   ├── IBilibiliSource.cs         │
 │   │   ├── BilibiliBridgeClient.cs    │
 │   │   ├── BilibiliSourceException.cs │
+│   │   ├── BilibiliCaption.cs         │
 │   │   ├── DashSegmentProbe.cs        │
-│   │   └── ResolvedAudio.cs           │
+│   │   └── ResolvedMedia.cs           │
 │   ├── Library/                       │
 │   │   ├── IMusicLibraryService.cs    │
 │   │   ├── MusicLibraryService.cs     │
@@ -117,6 +123,8 @@ SongPlayer/
 │   │   └── LibraryStore.cs            │
 │   └── Lyrics/                        │
 │       ├── ILyricProvider.cs          │
+│       ├── TrackLyricProvider.cs      │
+│       ├── CaptionStore.cs            │
 │       └── SampleLyricProvider.cs    ─┘
 │
 └── Interop/                          ─┐
@@ -200,21 +208,22 @@ composition root (§7.10).
 | `CaptionBarView.xaml(.cs)` | 57 + 28 | Brand mark, the `MaximizeButton` and the three window buttons. Visibility is inverted on `IsNowPlayingOpen`, because the overlay draws its own caption. Code-behind delegates to `CaptionChrome`. |
 | `SidebarView.xaml(.cs)` | 84 + 13 | `BROWSE` section with `Home`, `Local Music` and a disabled `Playlists` entry, plus a `Preview build` footer. |
 | `PageHeaderView.xaml(.cs)` | 28 + 13 | `PageTitle`, `PageSubtitle` and the search box. |
-| `PlayerBarView.xaml(.cs)` | 147 + 12 | Artwork button (opens Now Playing), metadata, favourite button, transport, seek bar, volume. No code-behind logic. |
+| `PlayerBarView.xaml(.cs)` | 201 + 36 | Artwork button (opens Now Playing) that paints the real cover, title, an honest source/artist line, transport, seek bar, volume. Code-behind forwards `SlimSlider.DraggingChanged` to `PlayerBar.SetSeeking`. |
 
 **`Views/Pages/`**
 
 | File | Lines | Contents |
 | --- | ---: | --- |
 | `HomePageView.xaml(.cs)` | 185 + 12 | Gradient hero banner with two CTAs, a `UniformGrid` of three quick-access cards (the first shows the live `Library.LibrarySummary`), and a compact "library is empty" card that hides itself once tracks exist. |
-| `LibraryPageView.xaml(.cs)` | 184 + 106 | Toolbar (`LibrarySummary`, status line, Clear library, Import folder), a `ListBox` track table (`#`/TITLE/ALBUM/TIME) and an empty state driven by `Library.HasNoTracks`. Code-behind mirrors `PlayerBar.CurrentTrack` into the list selection and turns a selection into `Library.PlayTrackCommand`, guarded by a flag so mirroring never starts playback. |
+| `LibraryPageView.xaml(.cs)` | 237 + 106 | Two toolbars: library actions (`LibrarySummary`, status line, Clear library, Import folder) and the online row (BV id box + `Play BV…` with its own status line). Then a `ListBox` track table (`#`/TITLE/ALBUM/TIME) and an empty state driven by `Library.HasNoTracks`. Code-behind mirrors `PlayerBar.CurrentTrack` into the list selection and turns a selection into `Library.PlayTrackCommand`, guarded by a flag so mirroring never starts playback. |
 
-**`Views/Overlays/NowPlayingView.xaml(.cs)`** (349 + 113) — the `Grid.RowSpan="3"` layer:
+**`Views/Overlays/NowPlayingView.xaml(.cs)`** (405 + 113) — the `Grid.RowSpan="3"` layer:
 its own caption strip (back button, `NOW PLAYING`, `OverlayMaximizeButton`), an
-artwork/facts/transport card on the left, and the lyric sheet on the right. Its code-behind
-holds the two genuinely view-only concerns: `ActiveLyricIndex` → `BringIntoView()` scrolling
-(deferred to `DispatcherPriority.Loaded` so freshly realised containers have a valid position)
-and click-to-seek on a lyric row.
+artwork/facts/transport card on the left (the artwork `Border` paints `PlayerBar.CoverImage`
+over a stretched background so the decoded bitmap has a size to fill), and the line sheet on
+the right. Its code-behind holds the two genuinely view-only concerns: `ActiveLyricIndex` →
+`BringIntoView()` scrolling (deferred to `DispatcherPriority.Loaded` so freshly realised
+containers have a valid position) and click-to-seek on a line.
 
 **`MainWindow.xaml.cs` (61 lines)** — now only window-level concerns: `OnMouseLeftButtonDown`
 (keeps the caption from stealing focus), `WindowMaximizeHelper.Attach(this)`, and
@@ -232,7 +241,11 @@ reference to `MainWindow`.
 dependency properties (`TrackBrush`, `FillBrush`, `ThumbBrush`, `TrackThickness` = 4.0,
 `ThumbDiameter` = 11.0). It inherits *all* behaviour from `Slider` (binding, keyboard
 stepping, value coercion, `ValueChanged`) and only replaces rendering (`OnRender`) and mouse
-handling (click-to-seek + drag). The thumb dot appears only on hover or while dragging, so
+handling (click-to-seek + drag). `Value` gets its metadata re-declared in the static
+constructor with `AffectsRender | BindsTwoWayByDefault`: the inherited `Slider.Value` metadata
+does not invalidate the visual, which is invisible on the stock control (its `Track` and `Thumb`
+parts repaint themselves) but left the hand-drawn fill frozen at its last paint — the playhead
+looked stuck until the mouse moved over the bar (§7.6). The thumb dot appears only on hover or while dragging, so
 the resting player bar stays flat.
 
 **`Converters/BoolToVisibilityConverter.cs` (38 lines)** — one converter with an `Invert`
@@ -247,7 +260,7 @@ other or their parent (§7.11). All use
 `CommunityToolkit.Mvvm` source generators (`[ObservableProperty]`, `[RelayCommand]`), so no
 `INotifyPropertyChanged` boilerplate is written by hand.
 
-**`MainWindowViewModel.cs` (336 lines)** — navigation state plus composition; the mediator.
+**`MainWindowViewModel.cs` (344 lines)** — navigation state plus composition; the mediator.
 
 - **Own state**: `CurrentPage`, `SearchText`, `IsNowPlayingOpen`.
 - **Derived state**: `IsHomeSelected` / `IsLibrarySelected` (settable, see §7.3), `PageTitle`,
@@ -266,15 +279,16 @@ other or their parent (§7.11). All use
   re-resolves an expired Bilibili link once and replays it. Neither child knows the other
   exists.
 
-**`ViewModels/Shell/PlayerBarViewModel.cs` (433 lines)** — transport plus track metadata, and
+**`ViewModels/Shell/PlayerBarViewModel.cs` (560 lines)** — transport plus track metadata, and
 the single place the playback position is published from.
 
 - **Input state**: `CurrentTrack` (`Track.Sample` by default), `IsPlaying`, `PositionSeconds`,
-  `Volume` (70), `StatusMessage`.
+  `Volume` (70), `StatusMessage`, `CoverImage`.
 - **Derived state**: `HasTrack`, `TrackTitle`, `TrackArtist`, `TrackAlbum`,
   `TrackAlbumPosition`, `ArtworkGlyph`, `DurationSeconds`, `DurationText`, `PositionText`,
   `PlayPauseGlyph`, `PlayPauseTooltip`, `HasStatusMessage`, `IsMuted`, `VolumeGlyph`,
-  `MuteTooltip`.
+  `MuteTooltip`, `HasCover` / `HasNoCover`, `CoverUri`, `IsOnline`, `SourceLabel`,
+  `HasSourceLabel`, `HasAlbumTags`.
 - **Commands**: `TogglePlayback` (gated by `HasTrack`), `Restart` (same gate), `ToggleMute`.
 - **Engine contract**: subscribes to `PositionChanged` / `PlaybackEnded` / `PlaybackFailed` in
   the constructor. `_isApplyingEnginePosition` marks the assignments that came *from* the
@@ -287,26 +301,51 @@ the single place the playback position is published from.
   reset *before* the record swap so the seek slider never spans the old and new duration.
 - `TrackAlbum` / `TrackAlbumPosition` read the real tags now, so the overlay says
   "Track 04" only when the file actually carries a track number.
+- **Cover art is downloaded, not bound.** `OnCurrentTrackChanged` starts
+  `CoverImageLoader.LoadAsync(Track.CoverUri)` through a `CancellationTokenSource` that is
+  cancelled on the next track, and the result is dropped when `ReferenceEquals(track,
+  CurrentTrack)` no longer holds — a fast library scroll therefore never paints an old cover
+  next to a new title. The loader returns `null` on any failure: a missing thumbnail must not
+  reach the transport.
+- **Online tracks are labelled honestly.** `IsOnline`, `SourceLabel` ("Bilibili video"),
+  `HasSourceLabel` and `HasAlbumTags` exist because a video title is not a song title, the
+  uploader is not the artist and a video has no album; the bar prints `Bilibili video ·
+  <uploader>` and the overlay swaps the album chips for the source chip instead of printing
+  "No album" for a field that could never be there.
 - `PlaybackFailed` (an event carrying the failed track) exists on top of `StatusMessage`: the
   message is what the bar displays, the event is what the shell needs in order to retry.
 
-**`ViewModels/Shell/BilibiliViewModel.cs` (177 lines)** — the online source input.
+**`ViewModels/Shell/BilibiliViewModel.cs` (195 lines)** — the online source input.
 
 - **State**: `Bvid`, `StatusMessage`, `IsBusy`, `HasError`; `TrackResolved` event.
-- **Commands**: `Play` (probe the bridge → resolve → read the stream duration → raise).
+- **Commands**: `Play` (probe the bridge → resolve → archive the subtitles → pick the duration →
+  raise). `ResolvedMedia.Duration` from the metadata endpoint wins; `DashSegmentProbe` is the
+  fallback for a bridge that could not read the video info.
+- It turns `ResolvedMedia` into a real `Track`: the video title becomes `Title`, the uploader
+  becomes `Artist`, `CoverUri` rides along for the artwork loader, and `Album` stays `null` on
+  purpose — a video has no album and inventing one would be a lie the UI then repeats.
 - **Refresh**: `TryRefreshAsync(Track)` re-resolves a stream whose signed URL expired, reading
   the video id back out of `Track.StreamKey`.
 - It builds a normal `Track` with `StreamKey` / `StreamUri` set, so online playback is not a
   second player — it is a track the existing transport already understands (§7.12).
 
-**`ViewModels/Shell/NowPlayingViewModel.cs` (109 lines)** — the karaoke half of the overlay.
+**`ViewModels/Shell/NowPlayingViewModel.cs` (175 lines)** — the karaoke half of the overlay.
 
 - `Lyrics` (an `ObservableCollection<LyricLineViewModel>`), `HasLyrics`, `ActiveLyricIndex`.
-- `LoadFor(Track)` rebuilds the rows from the injected `ILyricProvider`;
+- `LoadFor(Track)` rebuilds the rows from the injected `ILyricProvider`, remembers the track and
+  re-raises the five wording properties;
   `UpdateActiveLyric(TimeSpan)` picks the last line whose start time ≤ position and flips only
   the rows that change.
 - It holds **no** transport state: the position is pushed in by the shell mediator, so the
   overlay and the player bar always show the same instant.
+- **The wording is derived from the source, not fixed.** `SectionLabel` reads `SUBTITLES` for an
+  online track and `LYRICS` for a file; `SourceNotice` ("Timed by the video's subtitle track, not
+  by the song.") is printed under the list and hidden by `HasSourceNotice` when there is nothing
+  to explain; `EmptyTitle` / `EmptyHint` say "no subtitles" plus the real reason (Bilibili serves
+  most subtitle tracks only to a signed-in session) instead of promising an `.lrc` reader that
+  does not exist. A subtitle is a transcript of whatever the video says — an intro, a spoken
+  word, a machine transcript — and calling it "lyrics" would claim a correctness the source never
+  offered.
 
 **`ViewModels/Pages/LibraryPageViewModel.cs` (285 lines)** — the user-facing half of the
 import pipeline, and the only view model that talks to `IMusicLibraryService`.
@@ -331,7 +370,7 @@ rows that change, instead of invalidating the whole list.
 
 | File | Contents |
 | --- | --- |
-| `Track.cs` (85) | `sealed record Track(string Title, string Artist, TimeSpan Duration, string? FilePath = null, string? Album = null, int? TrackNumber = null, string? StreamKey = null, string? StreamUri = null)` with `IsPlayable` (a local path *or* a stream), `IsStream`, `DurationText`, `AlbumText` (an em dash when the file has no album tag), plus `Track.Empty` and `Track.Sample` so the player bar is reviewable before anything is imported. `StreamKey` is durable identity for de-duplication; `StreamUri` is a temporary signed URL and is never persisted |
+| `Track.cs` (97) | `sealed record Track(string Title, string Artist, TimeSpan Duration, string? FilePath = null, string? Album = null, int? TrackNumber = null, string? StreamKey = null, string? StreamUri = null, string? CoverUri = null)` with `IsPlayable` (a local path *or* a stream), `IsStream`, `HasCover`, `DurationText`, `AlbumText` (an em dash when the file has no album tag), plus `Track.Empty` and `Track.Sample` so the player bar is reviewable before anything is imported. `StreamKey` is durable identity for de-duplication; `StreamUri` is a temporary signed URL and is never persisted; `CoverUri` is an `http(s)` thumbnail address and is only ever a *source* for the loader, never an `ImageSource` in a binding |
 | `PlayerPage.cs` (15) | `enum PlayerPage { Home, Library }` — the overlay is intentionally *not* a member |
 | `LyricLine.cs` (12) | `sealed record LyricLine(TimeSpan Time, string Text)` |
 | `TimeSpanFormatting.cs` (28) | `ToClock(TimeSpan)` → `m:ss` / `h:mm:ss`; one home for the clock format instead of a private helper per view model |
@@ -342,7 +381,7 @@ a domain type.
 
 ### 4.5 Layer 5 — Services (`Services/`)
 
-**`Library/` (330 lines)** — the import pipeline, split by responsibility so each piece can be
+**`Library/` (369 lines)** — the import pipeline, split by responsibility so each piece can be
 replaced or faked on its own. `IMusicLibraryService` is the only library type a view model may
 depend on.
 
@@ -354,16 +393,31 @@ depend on.
 | `ITrackMetadataReader.cs` / `TrackMetadataReader.cs` | 19 + 81 | TagLibSharp title/artist/duration/album/track number with an explicit exception whitelist, so one corrupt file cannot abort a scan |
 | `LibraryStore.cs` | 78 | `library.json` read/write with a temp-file-then-move atomic write |
 
-**`Storage/` (52 lines)** — `IFolderPicker.PickFolder(string title)` and `FolderPicker`,
+**`Storage/` (54 lines)** — `IFolderPicker.PickFolder(string title)` and `FolderPicker`,
 which implements it with `Microsoft.Win32.OpenFolderDialog`. The interface exists so
 `LibraryPageViewModel` never references `Microsoft.Win32`: a hard-coded dialog would make the
 scan flow untestable and would drag a UI type into a view model.
 
-**`Lyrics/` (63 lines)** — `ILyricProvider.GetLyrics(Track)` and `SampleLyricProvider` (16
-placeholder lines, one every 12 s). This seam exists so an `.lrc` parser drops in without
-touching a view or a view model.
+**`Lyrics/` (275 lines)** — one interface, three implementations, and the seam that makes
+subtitles reach the existing karaoke pipeline without changing it.
 
-**`Audio/` (512 lines)** — `IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`,
+| File | Lines | Responsibility |
+| --- | ---: | --- |
+| `ILyricProvider.cs` | 24 | `GetLyrics(Track)` → timed lines in playback order, empty when there are none |
+| `TrackLyricProvider.cs` | 51 | The provider the shell actually injects: archived subtitles first, then the wrapped fallback |
+| `CaptionStore.cs` | 159 | `%LOCALAPPDATA%\SongPlayer\captions\<key>.json` — one file per online track |
+| `SampleLyricProvider.cs` | 41 | 16 placeholder lines at 12 s intervals for `Track.Sample` |
+
+Two decisions here are worth the ink. **Composition instead of a second interface:** the overlay
+only ever asks "the lines for this track", so `TrackLyricProvider` decides where they come from
+and `ILyricProvider` keeps its single method for every caller. **Subtitles are archived even
+though they are often empty:** the same video can return a full transcript on one resolve and
+nothing on the next (Bilibili gates most tracks behind a login), so `CaptionStore.SaveAsync`
+skips empty results rather than overwriting a transcript that was readable yesterday. Only the
+lines are stored — never the audio URL, which is signed with a deadline — and entries are keyed
+by the durable `StreamKey` rather than by the URL that expires.
+
+**`Audio/` (514 lines)** — `IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`,
 `Seek`, plus `PositionChanged` / `PlaybackEnded` / `PlaybackFailed`) and
 `LibVlcAudioPlayer`, the real engine: `LibVLCSharp`'s `MediaPlayer` wrapped so no view model
 ever sees an engine type. Four details carry the design:
@@ -391,22 +445,36 @@ ever sees an engine type. Four details carry the design:
 Both LibVLC objects have UI-thread affinity and are created in `App.OnStartup`, which is also
 why `App.OnExit` disposes them — an open media keeps the audio output device alive (§7.10).
 
-**`Bilibili/` (449 lines)** — the online source, kept behind one interface so nothing else in
+**`Artwork/` (99 lines)** — `CoverImageLoader.LoadAsync(string? uri, CancellationToken)` returns
+a frozen `BitmapImage` or `null`. Three details: the request carries a browser user agent and a
+`Referrer`, because a bare `HttpClient` is the one caller Bilibili's CDN sometimes refuses; the
+bitmap is created with `CacheOption.OnLoad` (so the stream is closed before the file is used) and
+`Freeze()`d (so it can cross from the download thread to the UI); and every failure — bad scheme,
+timeout, non-success status, undecodable bytes — collapses to `null`, because artwork is
+decoration and must never be able to stop playback. The class lives in `Services/Artwork` rather
+than `Services/Media` because a `SongPlayer.Services.Media` namespace shadows LibVLCSharp's
+`Media` type inside the audio engine (a `CS0118` that only shows up at the call site).
+
+**`Bilibili/` (622 lines)** — the online source, kept behind one interface so nothing else in
 the app knows Bilibili exists.
 
 | File | Lines | Responsibility |
 | --- | ---: | --- |
 | `IBilibiliSource.cs` | 31 | `ProbeAsync()` / `ResolveAsync(bvid)` |
-| `BilibiliBridgeClient.cs` | 115 | Talks to the local Node bridge on `127.0.0.1:39271`; validates the id, maps every failure to a sentence, never persists the URL |
-| `DashSegmentProbe.cs` | 292 | Reads the real duration out of the stream's `sidx` box |
+| `BilibiliBridgeClient.cs` | 206 | Talks to the local Node bridge on `127.0.0.1:39271`, maps every failure mode to a sentence, never persists the URL, and deserialises the full metadata payload |
+| `DashSegmentProbe.cs` | 293 | Reads the real duration out of the stream's `sidx` box (with an `mvhd` fallback) |
 | `BilibiliSourceException.cs` | 30 | Carries a message written for the user |
-| `ResolvedAudio.cs` | 11 | `(Bvid, AudioUri)` pair |
+| `BilibiliCaption.cs` | 14 | `(Seconds, Text)` — a timed subtitle line |
+| `ResolvedMedia.cs` | 40 | `(Bvid, AudioUri, Title, Uploader, CoverUri, Description, Duration, Captions)` |
 
-Two of those decisions are worth stating. The bridge is probed *before* resolving, so a bridge
+Three of those decisions are worth stating. The bridge is probed *before* resolving, so a bridge
 that is not running says "start it with node bridge.cjs" instead of surfacing a 20-second
-timeout. And the duration is read from a 16 KB ranged request rather than from the player: a
-Bilibili segment is a fragmented MP4 whose `mvhd` declares `duration = 0`, so without reading
-`sidx` an online track would show `00:00` and a seek slider with no range.
+timeout. The duration prefers the metadata endpoint and falls back to a 16 KB ranged request: a
+Bilibili segment is a fragmented MP4 whose `mvhd` declares `duration = 0`, so the probe has to
+read `sidx`, and the video-info endpoint is simply more reliable when it answers. And the
+metadata is *best effort*: a missing title falls back to the BV id, `Uploader` to `"Bilibili"`
+and every caption failure to an empty list — only a missing audio URL is treated as a resolve
+failure, because that is the only field playback cannot live without.
 
 ### 4.6 Layer 6 — Platform interop (`Interop/`)
 
@@ -444,12 +512,21 @@ borderless window is maximized (see §7.5).
 
    paste BV id ──► Bilibili.PlayCommand ──► IBilibiliSource
                      (IsBusy gate)            ├─► ProbeAsync  ("/health" - no bridge, no 20 s wait)
-                                              ├─► ResolveAsync ("/resolve?bvid=" to a signed .m4s URL)
-                                              └─► DashSegmentProbe (ranged GET, sidx, duration)
-                                                     └─► Track (StreamKey "bilibili:BV...", StreamUri)
+                                              ├─► ResolveAsync ("/resolve?bvid=" → audio URL + metadata)
+                                              ├─► CaptionStore.SaveAsync (skip when the list is empty)
+                                              └─► duration: metadata endpoint, else DashSegmentProbe
+                                                     └─► Track (real title/uploader/cover,
+                                                                StreamKey "bilibili:BV...", StreamUri)
                                                           └─► TrackResolved ──► MainWindowViewModel
                                                                                 ├─► PlayerBar.PlayTrack
                                                                                 └─► CurrentPage = Library
+
+   track loaded ──► PlayerBar.CurrentTrack ──► OnCurrentTrackChanged
+                          ├─► CoverImageLoader.LoadAsync(Track.CoverUri) ──► CoverImage ──► ImageBrush
+                          │     (cancelled on the next track; result dropped if the track moved on)
+                          └─► NowPlaying.LoadFor(track) ──► TrackLyricProvider
+                                                                ├─► CaptionStore (archived subtitles)
+                                                                └─► SampleLyricProvider (fallback)
 
    engine clock ──► IAudioPlayer.PositionChanged ──► PlayerBar.PositionSeconds (guarded)
                                                           (or: drag seek, same property)
@@ -489,6 +566,13 @@ Notable binding decisions:
   there is exactly one code path that navigates.
 - The overlay's transport controls bind to the *same* `PlayerBar` properties as the player
   bar, so the two never disagree — the overlay simply covers the bar.
+- **Provenance is a binding, not a caption.** `SectionLabel`, `SourceNotice`, `EmptyTitle`,
+  `EmptyHint`, `SourceLabel` and `HasAlbumTags` are all derived from `Track.IsStream`, so every
+  string that could misrepresent an online video ("album", "lyrics") flips with the track
+  instead of being duplicated in two XAML files.
+- No binding ever points at a remote URL. `CoverUri` is data; the `ImageBrush` binds to
+  `CoverImage`, a decoded `BitmapImage`. WPF would happily fetch an `http` URI on the UI thread
+  and stall the bar while it did.
 
 ---
 
@@ -506,9 +590,9 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Sidebar navigation with active indicator | ✅ | `Views/Shell/SidebarView.xaml` | `Playlists` entry disabled on purpose |
 | Home page | ✅ | `Views/Pages/HomePageView.xaml` | Both CTAs import and navigate; the track card shows the live library summary and hides its empty state once tracks exist |
 | Local Music page | ✅ | `Views/Pages/LibraryPageView.xaml` | Real track table (`#`/TITLE/ALBUM/TIME) with hover and selected states, empty state, and selection starts playback |
-| Player bar | ✅ | `Views/Shell/PlayerBarView.xaml` | Artwork, metadata, transport, seek, volume |
+| Player bar | ✅ | `Views/Shell/PlayerBarView.xaml` | Real cover art, metadata with an honest source/artist line, transport, seek, volume |
 | Now Playing overlay (open/close, Esc, covers the shell) | ✅ | `Views/Overlays/NowPlayingView` | |
-| Lyric sheet with karaoke highlight | ✅ | `ViewModels/Shell/NowPlayingViewModel.cs`, `Themes/NowPlaying.xaml` | Highlight logic is real, driven by `PositionSeconds` |
+| Lyric sheet with karaoke highlight | ✅ | `ViewModels/Shell/NowPlayingViewModel.cs`, `Themes/NowPlaying.xaml` | Highlight logic is real, driven by `PositionSeconds`; the header says `LYRICS` or `SUBTITLES` depending on the source |
 | Click a lyric line to seek | ✅ | `Views/Overlays/NowPlayingView.xaml.cs` + `MainWindowViewModel` | |
 | Custom-drawn slider (seek + volume) | ✅ | `Controls/SlimSlider.cs` | Click, drag, hover thumb |
 | Play / pause | ✅ | `PlayerBarViewModel.TogglePlayback` → `LibVlcAudioPlayer` | Glyph follows `IsPlaying`, which follows the engine |
@@ -518,7 +602,10 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Audio decoding & output | ✅ | `Services/Audio/LibVlcAudioPlayer.cs` | LibVLC 3.0.24 through `LibVLCSharp`; mp3/flac/wav/m4a/aac/wma/ogg/opus, plus HTTP streams |
 | Online source: Bilibili BV id to audio | ✅ | `ViewModels/Shell/BilibiliViewModel.cs` + `Services/Bilibili/` | Needs the local Node bridge on `127.0.0.1:39271`; the signed URL is resolved per play request and never stored |
 | Expired stream URL re-resolved once | ✅ | `MainWindowViewModel.OnPlayerBarPlaybackFailed` | A CDN link that rejects the request is re-resolved and replayed once per play request, then reported |
-| Tag reading | ✅ | `Services/Library/TrackMetadataReader.cs` | Title/artist/duration/album/track number feed both the table and the player bar; cover art is still an `ArtworkGlyph` |
+| Tag reading | ✅ | `Services/Library/TrackMetadataReader.cs` | Title/artist/duration/album/track number feed both the table and the player bar |
+| Cover art | ✅ (online) / 🟡 (local) | `Services/Artwork/CoverImageLoader.cs` | A Bilibili thumbnail is downloaded and painted in both artwork frames; embedded tag pictures for local files are not read yet, and those keep the glyph |
+| Video metadata → UI | ✅ | `Services/Bilibili/BilibiliBridgeClient.cs`, `BilibiliViewModel` | Title, uploader, thumbnail and duration all come from the bridge; album and track number stay empty because a video has neither |
+| Subtitle track → lyric pipeline | ✅ | `Services/Lyrics/{TrackLyricProvider,CaptionStore}.cs` | Archived per `StreamKey` and replayed through the same karaoke list; anonymous resolves usually return none, and the empty state says so |
 | `.lrc` parsing | ⛔ | `Services/Lyrics/` | `ILyricProvider` is the swap-in point |
 | Playlists | ⛔ | — | Nav entry disabled |
 | Restart track, mute, volume | ✅ | `PlayerBarViewModel` | No queue exists, so the left transport button restarts the current track; mute is derived from `Volume` rather than stored |
@@ -591,6 +678,18 @@ filled portion and a hover thumb. **Why:** the stock `Slider` template is heavy 
 `ActualWidth == 0`, i.e. the accent fill never rendered. Subclassing keeps *all* of `Slider`'s
 behaviour (binding, keyboard stepping, value coercion) and replaces only pixels, which is a
 far smaller surface than a full template.
+
+The one thing a hand-drawn `Slider` must not forget is the invalidation the stock control gets
+for free. `ValueProperty` is re-declared in the static constructor with
+`AffectsRender | BindsTwoWayByDefault`. **Why:** `Value` is inherited from `Slider`, whose own
+metadata does not invalidate the visual — the stock control does not need it, because its
+`Track`, `Thumb` and `RepeatButton` parts are re-laid-out by bindings when the value changes.
+A `SlimSlider` has an empty `ControlTemplate` and paints everything in `OnRender`, so without
+`AffectsRender` the fill only repainted when something else asked for a new frame: resizing,
+hovering, dragging. The symptom was reported as "the progress bar and the sound are stuck until
+I move the mouse over them", and it was entirely a missing invalidation — the position, the
+labels and the audio were correct the whole time. `BindsTwoWayByDefault` has to be repeated
+because `OverrideMetadata` replaces the flags rather than merging them.
 
 ### 7.7 Lyrics are data, not view state
 
@@ -675,6 +774,22 @@ declares none in `mvhd`; and `StreamKey` (`bilibili:BV...`) is the durable ident
 would produce a library of dead rows. Expiry is handled where it surfaces: a failed play of a
 stream re-resolves the key once and replays, and a second failure is reported as text.
 
+### 7.13 Borrowed metadata is labelled as borrowed
+
+A Bilibili video supplies a title, an uploader, a thumbnail, a duration and sometimes a
+subtitle track. None of those are the four fields a music player displays, and the difference is
+not cosmetic: the "artist" of an official MV is the label that uploaded it, the "album" does not
+exist, the "cover" is a video frame, and a subtitle is a transcript of whatever the video says —
+an intro, a spoken word, a machine transcription. **Why the UI says so:** filling the same
+`Track` record is unavoidable (the transport only understands tracks), but *presenting* those
+values under the local-file labels would be a quiet lie, and the user is the one who would act on
+it. So the model carries the true shape (`Artist` = uploader, `Album` = `null`, `HasCover`,
+`IsStream`) and the presentation layer derives its wording from the source: `SourceLabel`
+("Bilibili video"), the `SUBTITLES` / `LYRICS` header, the provenance footer, and the subtitle
+empty state that names the login restriction instead of blaming the video. Every one of those is
+a derived property on a view model, so the honest version cannot drift out of sync with the
+dishonest one.
+
 ---
 
 ## 8. Known limitations
@@ -686,16 +801,19 @@ stream re-resolves the key once and replays, and a second failure is reported as
   the sibling `SongPlayer.SourceLab` project; if it is not running, the page says so and local
   playback is unaffected. SongPlayer does not speak the Bilibili API itself.
 - **Streams cannot be saved.** An online track lives only for the current session: it is not
-  written to `library.json` (only `FilePath` is persisted) and has no lyrics, artwork or album,
-  so reopening the app loses it.
+  written to `library.json` (only `FilePath` is persisted), so reopening the app loses it. Its
+  subtitle lines *are* archived in `%LOCALAPPDATA%\SongPlayer\captions`, but nothing currently
+  lists that archive — it only replays when the same BV id is played again.
 - **An unindexable stream has no seek range.** `sidx` gives the length for a normal Bilibili
   segment; a source that omits it shows `00:00` and a slider the engine refuses to move.
 - **The library is real but shallow.** Import, persistence and the track table work, yet there
   is no search over it, no sort, no per-track removal (only `Clear library`), no progress report
   for a very large folder, and no duplicate detection beyond the file path.
-- **Placeholder artwork and album facts.** Album, track number and artwork are still
-  `TrackAlbum`, `TrackAlbumPosition` and `ArtworkGlyph`, even though `TrackMetadataReader` can
-  read real tags.
+- **Local artwork is still a glyph.** Embedded tag pictures are not read; a local file shows the
+  `ArtworkGlyph` frame. Only online tracks get a real image, because only they carry a URL.
+- **Subtitles are usually invisible.** Most Bilibili subtitle tracks are served only to a
+  signed-in session, so an online track normally shows "No subtitles for this video" even when
+  the video has a transcript. SongPlayer does not attempt to log in.
 - **Persistence is library-only.** The track index survives a restart; volume, window state,
   the current page and the current track do not.
 - **Dark theme only.** The token layer makes a light theme possible but no switch exists;
@@ -742,15 +860,17 @@ probes, resolves and raises `TrackResolved` with an ordinary `Track`.
 `PositionChanged` with the engine's own playhead and never echo a position back as a seek.
 
 **Load real lyrics**
-Implement `ILyricProvider` with an `.lrc` parser that produces `LyricLine` values and construct
-it in `App.xaml.cs` instead of `SampleLyricProvider`. Nothing else changes — the view, the
-highlight logic and click-to-seek are all generic.
+Implement `ILyricProvider` with an `.lrc` parser that produces `LyricLine` values and hand it to
+`TrackLyricProvider` as the fallback it already takes instead of `SampleLyricProvider`. Nothing
+else changes — the view, the highlight logic and click-to-seek are all generic, and the
+"`SUBTITLES` vs `LYRICS`" wording already keys off `Track.IsStream`.
 
-**Load real artwork**
-Replace the glyph `TextBlock` inside the two artwork `Border`s with an `Image` bound to a new
-`ArtworkSource` property on `PlayerBarViewModel` (sourced from `TrackMetadataReader`'s
-`TagLib` picture frame). `ArtworkFrameStyle` and the overlay's `Viewbox` already handle
-sizing.
+**Load real artwork for local files**
+The online path is the template: `PlayerBarViewModel.OnCurrentTrackChanged` already starts a
+cancellable load and publishes a frozen `BitmapImage` as `CoverImage`, and both artwork frames
+bind to it. Add a second loader that reads the `TagLib` picture frame from `Track.FilePath` and
+assign the same property; the glyph stays as the `HasNoCover` state and nothing in the views
+changes. `ArtworkFrameStyle` and the overlay's `Viewbox` already handle sizing.
 
 **Filter and sort the library**
 `LibraryPageViewModel` owns the only `Tracks` collection. Put the filter and the sort keys in
@@ -780,6 +900,7 @@ These were checked and are currently clean; they are worth keeping clean:
 | Native dependency present | `bin/Debug/net10.0-windows/win-x64/libvlc/win-x64/libvlc.dll` after a build | `RuntimeIdentifier=win-x64` alone pins the process to x64 (verified PE machine 0x8664), so the solution keeps its single `Any CPU` platform and Visual Studio stays launchable |
 | Comments on non-obvious code | comment-line ratio per file | 34% overall; every public type and command documented |
 | Runtime smoke test | launch, navigate every page, open/close the overlay, maximize, seek | passes at 1180×760 and 1920×1032 |
+| Custom-drawn controls repaint on their own | drive the app, screenshot the same pixel row over several seconds, compare the accent fill width | `SlimSlider` fill grows monotonically while playing (§7.6) |
 
 ---
 

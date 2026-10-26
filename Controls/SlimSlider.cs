@@ -107,6 +107,21 @@ public sealed class SlimSlider : Slider
             typeof(SlimSlider),
             new FrameworkPropertyMetadata(typeof(SlimSlider))
         );
+
+        // The stock Slider repaints through its Track/Thumb parts, which react to Value on their
+        // own. This control has no template at all and paints everything in OnRender, so without
+        // an AffectsRender flag on Value the bar only refreshes when something else invalidates it
+        // - a mouse enter, a drag, a resize - and playback looks frozen until the pointer moves
+        // over the control. BindsTwoWayByDefault is repeated because OverrideMetadata replaces the
+        // inherited metadata instead of merging with it.
+        ValueProperty.OverrideMetadata(
+            typeof(SlimSlider),
+            new FrameworkPropertyMetadata(
+                0d,
+                FrameworkPropertyMetadataOptions.AffectsRender
+                    | FrameworkPropertyMetadataOptions.BindsTwoWayByDefault
+            )
+        );
     }
 
     public SlimSlider()

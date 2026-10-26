@@ -1,7 +1,9 @@
+using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
 using SongPlayer.Services.Audio;
+using SongPlayer.Services.Artwork;
 
 namespace SongPlayer.ViewModels.Shell;
 
@@ -27,6 +29,12 @@ public partial class PlayerBarViewModel : ObservableObject
     /// why every call is null-conditional: the bar stays usable as a pure UI shell.
     /// </summary>
     private readonly IAudioPlayer? _audioPlayer;
+
+    /// <summary>
+    /// Downloads the artwork of the loaded track. A field rather than a parameter the view passes
+    /// in, because the bar is the only consumer and the loader holds no state worth injecting.
+    /// </summary>
+    private readonly CoverImageLoader _coverLoader = new();
 
     /// <summary>
     /// True while <see cref="PositionSeconds"/> is being assigned from an engine report, which
@@ -140,14 +148,77 @@ public partial class PlayerBarViewModel : ObservableObject
         !string.IsNullOrWhiteSpace(CurrentTrack.Album) ? CurrentTrack.Album! : "No album";
 
     /// <summary>
+    /// True when the loaded track plays from an online source rather than a local file.
+    /// </summary>
+    /// <remarks>
+    /// The view uses this to swap the trusted tag labels for the honest ones: an online track has
+    /// a video title and an uploader, not a song title and an artist, and it has no album at all.
+    /// </remarks>
+    public bool IsOnline => CurrentTrack.IsStream;
+
+    /// <summary>
+    /// Name of the online source, or <see langword="null"/> for local files.
+    /// </summary>
+    /// <remarks>
+    /// Shown as a chip instead of the album chip. Two chips that both read "—" would suggest the
+    /// track merely lacks tags, when the truth is that this kind of track never carries them.
+    /// </remarks>
+    public string? SourceLabel => CurrentTrack.IsStream ? "Bilibili video" : null;
+
+    /// <summary>
+    /// True when <see cref="SourceLabel"/> should be painted.
+    /// </summary>
+    public bool HasSourceLabel => !string.IsNullOrEmpty(SourceLabel);
+
+    /// <summary>
+    /// True when the album chip is meaningful; bound to its visibility.
+    /// </summary>
+    /// <remarks>
+    /// Online tracks have no album tag by construction, so showing "No album" would misreport a
+    /// missing field as missing metadata.
+    /// </remarks>
+    public bool HasAlbumTags => !CurrentTrack.IsStream;
+
+    /// <summary>
     /// Track position inside its album, formatted the way music players show it.
     /// </summary>
     public string TrackAlbumPosition =>
         CurrentTrack.TrackNumber is { } number ? $"Track {number:D2}" : "—";
 
     /// <summary>
-    /// Glyph of the procedural artwork placeholder. Real cover art will replace this once
-    /// tag reading lands, so the view already binds it instead of hard-coding the glyph.
+    /// Decoded artwork of the loaded track, or <see langword="null"/> while it is still loading or
+    /// when the track has none.
+    /// </summary>
+    /// <remarks>
+    /// A frozen bitmap rather than a URL because the download can fail, and a failed 
+    /// <c>Image.Source</c> renders as nothing at all — the same pixels as "still loading" — which
+    /// leaves the bar looking broken. Assigning <see langword="null"/> here instead keeps the
+    /// placeholder glyph visible until real pixels exist.
+    /// </remarks>
+    [ObservableProperty]
+    private BitmapImage? coverImage;
+
+    /// <summary>
+    /// True when decoded artwork is available to paint.
+    /// </summary>
+    public bool HasCover => CoverImage is not null;
+
+    /// <summary>
+    /// True when the placeholder is shown; bound to the glyph's visibility.
+    /// </summary>
+    public bool HasNoCover => !HasCover;
+
+    /// <summary>
+    /// URL of the loaded track's artwork, or <see langword="null"/> when it has none.
+    /// </summary>
+    /// <remarks>
+    /// Kept for reference and tooltips; the view binds <see cref="CoverImage"/>, because WPF's own
+    /// URI conversion fails silently.
+    /// </remarks>
+    public string? CoverUri => CurrentTrack.CoverUri;
+
+    /// <summary>
+    /// Glyph of the procedural artwork placeholder, shown for tracks without artwork.
     /// </summary>
     public string ArtworkGlyph => "\uE8D6";
 
@@ -258,12 +329,67 @@ public partial class PlayerBarViewModel : ObservableObject
         OnPropertyChanged(nameof(TrackTitle));
         OnPropertyChanged(nameof(TrackArtist));
         OnPropertyChanged(nameof(TrackAlbum));
+        OnPropertyChanged(nameof(IsOnline));
+        OnPropertyChanged(nameof(SourceLabel));
+        OnPropertyChanged(nameof(HasSourceLabel));
+        OnPropertyChanged(nameof(HasAlbumTags));
+        OnPropertyChanged(nameof(CoverUri));
         OnPropertyChanged(nameof(TrackAlbumPosition));
         OnPropertyChanged(nameof(DurationSeconds));
         OnPropertyChanged(nameof(DurationText));
         TogglePlaybackCommand.NotifyCanExecuteChanged();
         RestartCommand.NotifyCanExecuteChanged();
+
+        LoadCover(value);
     }
+
+    /// <summary>
+    /// Starts loading the artwork of <paramref name="track"/>, cancelling whatever was in flight.
+    /// </summary>
+    /// <param name="track">Track that just became current.</param>
+    /// <remarks>
+    /// Fire-and-forget on purpose: artwork is decoration, and the transport must not wait for a
+    /// thumbnail. A second track change cancels the first download, so flicking through the
+    /// library does not queue up hundreds of requests.
+    /// </remarks>
+    private async void LoadCover(Track track)
+    {
+        _coverCancellation?.Cancel();
+
+        CoverImage = null;
+
+        if (!track.HasCover)
+        {
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+
+        _coverCancellation = cancellation;
+
+        BitmapImage? image = await _coverLoader.LoadAsync(track.CoverUri, cancellation.Token);
+
+        // A late answer for a track that is no longer loaded must be dropped, otherwise the bar
+        // would show the previous track's artwork next to the new title.
+        if (!cancellation.IsCancellationRequested && ReferenceEquals(track, CurrentTrack))
+        {
+            CoverImage = image;
+        }
+    }
+
+    /// <summary>
+    /// Raised when <see cref="CoverImage"/> becomes available or is cleared.
+    /// </summary>
+    partial void OnCoverImageChanged(BitmapImage? value)
+    {
+        OnPropertyChanged(nameof(HasCover));
+        OnPropertyChanged(nameof(HasNoCover));
+    }
+
+    /// <summary>
+    /// Download of the current artwork, cancelled when the track changes.
+    /// </summary>
+    private CancellationTokenSource? _coverCancellation;
 
     /// <summary>
     /// Restarts the loaded track from the beginning.

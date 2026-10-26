@@ -25,13 +25,33 @@
                     Command="{Binding OpenNowPlayingCommand}"
                     Style="{StaticResource ArtworkButtonStyle}"
                     ToolTip="Open Now Playing">
-                    <TextBlock
-                        Text="&#xE8D6;"
-                        FontFamily="Segoe MDL2 Assets"
-                        FontSize="19"
-                        Foreground="{StaticResource TextTertiaryBrush}"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center" />
+                    <!--
+                        Real artwork when the track has some, the procedural glyph otherwise.
+                        Both live in the same 52x52 button so the bar keeps its rhythm.
+                    -->
+                    <Grid>
+                        <!-- An ImageBrush instead of an Image so the corners follow the
+                             button frame; an Image would paint over the rounded border. The
+                             bitmap arrives already decoded, so a missing cover simply never
+                             sets this branch. -->
+                        <Border
+                            Width="50"
+                            Height="50"
+                            CornerRadius="4"
+                            Visibility="{Binding PlayerBar.HasCover, Converter={StaticResource BoolToVisibility}}">
+                            <Border.Background>
+                                <ImageBrush ImageSource="{Binding PlayerBar.CoverImage}" Stretch="UniformToFill" />
+                            </Border.Background>
+                        </Border>
+                        <TextBlock
+                            Text="{Binding PlayerBar.ArtworkGlyph}"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="19"
+                            Foreground="{StaticResource TextTertiaryBrush}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="{Binding PlayerBar.HasNoCover, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
                 </Button>
 
                 <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
@@ -42,15 +62,32 @@
                         TextTrimming="CharacterEllipsis" />
 
                     <!--
-                        The artist line doubles as the transport error line: a failed play has
+                        The second line doubles as the transport error line: a failed play has
                         nowhere else to go in this shell, and the player bar is where the user
                         just clicked.
+
+                        For local files it shows the artist tag. For online videos the same slot
+                        carries the uploader, prefixed so nobody reads it as the artist.
                     -->
-                    <TextBlock
-                        Margin="0,4,0,0"
-                        Text="{Binding PlayerBar.TrackArtist}"
-                        Style="{StaticResource CaptionTextStyle}"
-                        Visibility="{Binding PlayerBar.HasStatusMessage, Converter={StaticResource InverseBoolToVisibility}}" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock
+                            Margin="0,4,0,0"
+                            Text="{Binding PlayerBar.SourceLabel}"
+                            Style="{StaticResource CaptionTextStyle}"
+                            Foreground="{StaticResource AccentBrush}"
+                            Visibility="{Binding PlayerBar.HasSourceLabel, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock
+                            Margin="6,4,6,0"
+                            Text="·"
+                            Style="{StaticResource CaptionTextStyle}"
+                            Visibility="{Binding PlayerBar.HasSourceLabel, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock
+                            Margin="0,4,0,0"
+                            Text="{Binding PlayerBar.TrackArtist}"
+                            Style="{StaticResource CaptionTextStyle}"
+                            TextTrimming="CharacterEllipsis"
+                            Visibility="{Binding PlayerBar.HasStatusMessage, Converter={StaticResource InverseBoolToVisibility}}" />
+                    </StackPanel>
                     <TextBlock
                         Margin="0,4,0,0"
                         Text="{Binding PlayerBar.StatusMessage}"

@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
 using SongPlayer.Services.Bilibili;
+using SongPlayer.Services.Lyrics;
 
 namespace SongPlayer.ViewModels.Shell;
 
@@ -22,14 +23,17 @@ namespace SongPlayer.ViewModels.Shell;
 public partial class BilibiliViewModel : ObservableObject
 {
     private readonly IBilibiliSource _source;
+    private readonly CaptionStore _captions;
 
     /// <summary>
     /// Creates the input.
     /// </summary>
     /// <param name="source">Bridge client that resolves ids into audio URLs.</param>
-    public BilibiliViewModel(IBilibiliSource source)
+    /// <param name="captions">Archive the readable subtitles are stored in.</param>
+    public BilibiliViewModel(IBilibiliSource source, CaptionStore captions)
     {
         _source = source;
+        _captions = captions;
     }
 
     /// <summary>
@@ -147,7 +151,7 @@ public partial class BilibiliViewModel : ObservableObject
     /// Resolves <paramref name="bvid"/> into a playable stream track.
     /// </summary>
     /// <param name="bvid">Video id to resolve.</param>
-    /// <returns>A track whose <see cref="Track.StreamUri"/> points at the audio segment.</returns>
+    /// <returns>A track carrying the video title, uploader, thumbnail and length.</returns>
     /// <exception cref="BilibiliSourceException">The bridge is missing, the id is wrong, or the CDN refused.</exception>
     private async Task<Track> ResolveTrackAsync(string bvid)
     {
@@ -157,21 +161,34 @@ public partial class BilibiliViewModel : ObservableObject
                 "The local bridge is not running. Start it with “node bridge.cjs” and try again.");
         }
 
-        ResolvedAudio resolved = await _source.ResolveAsync(bvid);
+        ResolvedMedia media = await _source.ResolveAsync(bvid);
 
-        // The stream header cannot say how long the track is (a Bilibili segment declares a zero
-        // duration), so the length is read out of its sidx box. Falling back to zero is honest:
-        // the slider then simply has nothing to span.
-        TimeSpan duration = await DashSegmentProbe.TryReadDurationAsync(
-            resolved.AudioUri,
-            referer: "https://www.bilibili.com/") ?? TimeSpan.Zero;
+        string streamKey = $"bilibili:{media.Bvid}";
 
+        // Archive whatever subtitles came back before building the track. The store ignores an
+        // empty list, so a video whose captions are hidden behind a login keeps the copy that was
+        // archived on an earlier play.
+        await _captions.SaveAsync(streamKey, media.Captions);
+
+        // The metadata endpoint reports the video length, which is the length of the audio the user
+        // is about to hear. The segment probe is only a fallback: a fragmented stream declares a
+        // zero duration in its header.
+        TimeSpan duration = media.Duration > TimeSpan.Zero
+            ? media.Duration
+            : await DashSegmentProbe.TryReadDurationAsync(
+                media.AudioUri,
+                referer: "https://www.bilibili.com/") ?? TimeSpan.Zero;
+
+        // Title and uploader are shown as they are: a video title is not a song title and the
+        // uploader is not necessarily the artist, so the UI labels them with a source chip rather
+        // than pretending they are tags.
         return new Track(
-            $"Bilibili · {resolved.Bvid}",
-            "Bilibili",
+            media.Title,
+            media.Uploader,
             duration,
             Album: null,
-            StreamKey: $"bilibili:{resolved.Bvid}",
-            StreamUri: resolved.AudioUri.AbsoluteUri);
+            StreamKey: streamKey,
+            StreamUri: media.AudioUri.AbsoluteUri,
+            CoverUri: media.CoverUri?.AbsoluteUri);
     }
 }

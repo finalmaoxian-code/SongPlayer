@@ -31,6 +31,11 @@ namespace SongPlayer.Models;
 /// URLs with a deadline, so this is a snapshot that goes stale and must never be persisted;
 /// it is re-resolved from <paramref name="StreamKey"/> before each playback.
 /// </param>
+/// <param name="CoverUri">
+/// Absolute http(s) URL of the artwork, or <see langword="null"/> when the track has none.
+/// For an online source this is the video thumbnail, which is a reasonable stand-in for cover
+/// art but is not the album cover; for a local file nothing sets it yet.
+/// </param>
 public sealed record Track(
     string Title,
     string Artist,
@@ -39,7 +44,8 @@ public sealed record Track(
     string? Album = null,
     int? TrackNumber = null,
     string? StreamKey = null,
-    string? StreamUri = null)
+    string? StreamUri = null,
+    string? CoverUri = null)
 {
     /// <summary>
     /// True when the track can be handed to the audio engine, either as a file on disk or as an
@@ -52,6 +58,11 @@ public sealed record Track(
     /// True when the track comes from an online source rather than a file on disk.
     /// </summary>
     public bool IsStream => !string.IsNullOrWhiteSpace(StreamKey);
+
+    /// <summary>
+    /// True when the track carries artwork the player can show.
+    /// </summary>
+    public bool HasCover => !string.IsNullOrWhiteSpace(CoverUri);
 
     /// <summary>
     /// Track length as <c>m:ss</c>, ready for the library table.

@@ -36,10 +36,11 @@ public partial class MainWindowViewModel : ObservableObject
     /// </remarks>
     public MainWindowViewModel()
         : this(
-            new SampleLyricProvider(),
+            new TrackLyricProvider(new CaptionStore(), new SampleLyricProvider()),
             CreateDesignTimeLibrary(),
             new FolderPicker(),
             new BilibiliBridgeClient(),
+            new CaptionStore(),
             audioPlayer: null)
     {
     }
@@ -61,6 +62,11 @@ public partial class MainWindowViewModel : ObservableObject
     /// <param name="library">Library facade behind the Local Music page.</param>
     /// <param name="folderPicker">Picker used by the import command.</param>
     /// <param name="bilibiliSource">Bridge client behind the Bilibili input.</param>
+    /// <param name="captionStore">
+    /// Archive shared by the Bilibili input, which writes the subtitles it reads, and the lyric
+    /// provider, which reads them back. One instance so a resolve is visible to the overlay
+    /// immediately.
+    /// </param>
     /// <param name="audioPlayer">
     /// Engine that executes the transport commands, or <c>null</c> to keep the transport purely
     /// visual.
@@ -70,6 +76,7 @@ public partial class MainWindowViewModel : ObservableObject
         IMusicLibraryService library,
         IFolderPicker folderPicker,
         IBilibiliSource bilibiliSource,
+        CaptionStore captionStore,
         IAudioPlayer? audioPlayer = null)
     {
         PlayerBar = audioPlayer is null
@@ -82,7 +89,7 @@ public partial class MainWindowViewModel : ObservableObject
         Library = new LibraryPageViewModel(library, folderPicker);
         Library.TrackActivated += OnLibraryTrackActivated;
 
-        Bilibili = new BilibiliViewModel(bilibiliSource);
+        Bilibili = new BilibiliViewModel(bilibiliSource, captionStore);
         Bilibili.TrackResolved += OnBilibiliTrackResolved;
 
         PlayerBar.PropertyChanged += OnPlayerBarPropertyChanged;

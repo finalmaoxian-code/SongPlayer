@@ -36,11 +36,22 @@ public partial class App : Application
         IFolderPicker folderPicker = new FolderPicker();
         IBilibiliSource bilibiliSource = new BilibiliBridgeClient();
         LibVlcAudioPlayer audioPlayer = new();
-        ILyricProvider lyricProvider = new SampleLyricProvider();
+
+        // Online subtitles are archived on disk and preferred over the fallback provider, so a
+        // track that played once with captions keeps them even after the bridge stops returning
+        // them (the player endpoint hides subtitles for some videos when nobody is logged in).
+        var captionStore = new CaptionStore();
+        ILyricProvider lyricProvider = new TrackLyricProvider(captionStore, new SampleLyricProvider());
 
         _audioPlayer = audioPlayer;
 
-        MainWindowViewModel viewModel = new(lyricProvider, library, folderPicker, bilibiliSource, audioPlayer);
+        MainWindowViewModel viewModel = new(
+            lyricProvider,
+            library,
+            folderPicker,
+            bilibiliSource,
+            captionStore,
+            audioPlayer);
 
         MainWindow = new MainWindow { DataContext = viewModel };
         MainWindow.Show();
