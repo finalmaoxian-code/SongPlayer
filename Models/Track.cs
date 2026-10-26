@@ -8,8 +8,22 @@ namespace SongPlayer.Models;
 /// <param name="Title">Display title of the track.</param>
 /// <param name="Artist">Performing artist, or an empty string when unknown.</param>
 /// <param name="Duration">Total length of the track.</param>
-public sealed record Track(string Title, string Artist, TimeSpan Duration)
+/// <param name="FilePath">
+/// Absolute path of the audio file on disk, or <see langword="null"/> for the demo track
+/// that carries no audio data. This is also what the library is persisted as, so a track
+/// without a path is never written to <c>library.json</c>.
+/// </param>
+public sealed record Track(
+    string Title,
+    string Artist,
+    TimeSpan Duration,
+    string? FilePath = null)
 {
+    /// <summary>
+    /// True when the track is backed by a real file rather than placeholder data.
+    /// </summary>
+    public bool IsPlayable => !string.IsNullOrWhiteSpace(FilePath);
+
     /// <summary>
     /// Placeholder used by the player bar when nothing is loaded.
     /// </summary>
