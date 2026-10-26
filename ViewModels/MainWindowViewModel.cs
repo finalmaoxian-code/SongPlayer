@@ -39,6 +39,7 @@ public partial class MainWindowViewModel : ObservableObject
             new TrackLyricProvider(new CaptionStore(), new SampleLyricProvider()),
             CreateDesignTimeLibrary(),
             new FolderPicker(),
+            new ConfirmationPrompt(),
             new BilibiliBridgeClient(),
             new CaptionStore(),
             audioPlayer: null)
@@ -61,6 +62,7 @@ public partial class MainWindowViewModel : ObservableObject
     /// <param name="lyricProvider">Source of the timed lyrics shown on the Now Playing overlay.</param>
     /// <param name="library">Library facade behind the Local Music page.</param>
     /// <param name="folderPicker">Picker used by the import command.</param>
+    /// <param name="confirmation">Prompt raised before the library is cleared.</param>
     /// <param name="bilibiliSource">Bridge client behind the Bilibili input.</param>
     /// <param name="captionStore">
     /// Archive shared by the Bilibili input, which writes the subtitles it reads, and the lyric
@@ -75,6 +77,7 @@ public partial class MainWindowViewModel : ObservableObject
         ILyricProvider lyricProvider,
         IMusicLibraryService library,
         IFolderPicker folderPicker,
+        IConfirmationPrompt confirmation,
         IBilibiliSource bilibiliSource,
         CaptionStore captionStore,
         IAudioPlayer? audioPlayer = null)
@@ -86,11 +89,12 @@ public partial class MainWindowViewModel : ObservableObject
         NowPlaying = new NowPlayingViewModel(lyricProvider);
         NowPlaying.LoadFor(PlayerBar.CurrentTrack);
 
-        Library = new LibraryPageViewModel(library, folderPicker);
+        Library = new LibraryPageViewModel(library, folderPicker, confirmation);
         Library.TrackActivated += OnLibraryTrackActivated;
 
         Bilibili = new BilibiliViewModel(bilibiliSource, captionStore);
         Bilibili.TrackResolved += OnBilibiliTrackResolved;
+        Bilibili.TrackPersisted += OnBilibiliTrackPersisted;
 
         PlayerBar.PropertyChanged += OnPlayerBarPropertyChanged;
         PlayerBar.PlaybackFailed += OnPlayerBarPlaybackFailed;
@@ -276,11 +280,43 @@ public partial class MainWindowViewModel : ObservableObject
     /// The library page does not know the player bar exists; it raises an event and the mediator
     /// decides what it means. Selecting a row only loads the track (position reset, lyrics rebuilt,
     /// transport enabled) — starting playback stays an explicit action on the transport button.
+    /// <para>
+    /// A restored online track arrives without a stream URL, because the signed one expired hours
+    /// ago. Loading it therefore resolves the key again first: the alternative is loading a track
+    /// that is known to be unplayable and then letting the failure path refresh it, which would
+    /// flash an error at the user for something the app already knew.
+    /// </para>
     /// </remarks>
-    private void OnLibraryTrackActivated(object? sender, Track track)
+    private async void OnLibraryTrackActivated(object? sender, Track track)
     {
-        PlayerBar.LoadTrack(track);
+        if (track.IsStream && !track.IsPlayable)
+        {
+            Track? refreshed = await Bilibili.TryRefreshAsync(track);
+
+            PlayerBar.LoadTrack(refreshed ?? track);
+        }
+        else
+        {
+            PlayerBar.LoadTrack(track);
+        }
+
         CurrentPage = PlayerPage.Library;
+    }
+
+    /// <summary>
+    /// Keeps a resolved online track in the library so it survives a restart.
+    /// </summary>
+    /// <remarks>
+    /// Only the stream key is durable; <c>LibraryEntry</c> caches the title, uploader, length and
+    /// thumbnail beside it so the restored row is readable, and the URL is resolved again on
+    /// playback. Fire-and-forget is acceptable here because the save is a cache write: if it
+    /// fails, the session still plays and the only loss is the row in the next session.
+    /// </remarks>
+    /// <param name="sender">Bilibili input that resolved the track.</param>
+    /// <param name="track">Track to remember.</param>
+    private async void OnBilibiliTrackPersisted(object? sender, Track track)
+    {
+        await Library.AddOrUpdateAsync(track);
     }
 
     /// <summary>

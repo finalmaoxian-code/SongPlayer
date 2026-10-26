@@ -165,11 +165,14 @@ the local Node bridge (`127.0.0.1:39271`, from the sibling `SongPlayer.SourceLab
 the DASH audio URL, reads the real duration out of the stream's `sidx` box, and plays it through
 the same engine and the same transport. The video's title, uploader and thumbnail come back with
 it: the player bar and the Now Playing overlay show the real cover, and the metadata is labelled
-as a video's rather than a song's. Any subtitle track the bridge could read is archived under
-`%LOCALAPPDATA%\SongPlayer\captions` and replayed through the same karaoke list — Bilibili only
-publishes most subtitle tracks to a signed-in session, so that list is usually empty and the
-overlay says why. The bridge has to be running; the page says so when it is not, and local files
-keep working regardless. The signed URL is never persisted.
+as a video's rather than a song's. A resolved video is remembered by its BV id, so the row is
+still in the library after a restart — with its cached title, uploader, length and thumbnail, but
+without a URL. Selecting such a row resolves the stream again before loading it, which is one
+network round trip the user only pays for tracks they actually pick. Any subtitle track the
+bridge could read is archived under `%LOCALAPPDATA%\SongPlayer\captions` and replayed through the
+same karaoke list — Bilibili only publishes most subtitle tracks to a signed-in session, so that
+list is usually empty and the overlay says why. The bridge has to be running; the page says so
+when it is not, and local files keep working regardless. The signed URL is never persisted.
 
 The Now Playing overlay's right-hand card opens on a **live spectrum** of what SongPlayer is
 playing: NAudio's WASAPI process loopback records this process's own output, a 2048-point FFT
@@ -179,9 +182,15 @@ stays visible but disabled. The capture starts and stops with visibility and pla
 hidden or paused overlay costs nothing, and a machine that refuses the capture simply keeps the
 idle wave instead of failing the player.
 
+**Clear library** asks for confirmation first and states that the audio files on disk are not
+deleted; cancelling leaves the library exactly as it was. There is still no undo, so the list
+itself is the thing at risk rather than the files. With nothing loaded the player bar shows
+`Nothing playing` and the transport stays disabled, instead of offering a demo track that has no
+audio behind it.
+
 There is no queue yet: a track ends where it ends, and the left transport button restarts the
 current track rather than stepping back through history. `.lrc` parsing, embedded cover art for
-local files, search over the library, playlists, saving online tracks, and a queue with
+local files, search over the library, playlists, per-track removal and a queue with
 next/shuffle/repeat are the next milestones. A choice of visualiser style (bars, radial,
-waveform) is deliberately left as a swap of `AudioVisualizer.OnRender`. Controls that are not yet implemented are visibly
-disabled rather than silently inert.
+waveform) is deliberately left as a swap of `AudioVisualizer.OnRender`. Controls that are not yet
+implemented are visibly disabled rather than silently inert.

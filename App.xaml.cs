@@ -34,6 +34,7 @@ public partial class App : Application
         var metadataReader = new TrackMetadataReader(scanner);
         IMusicLibraryService library = new MusicLibraryService(scanner, metadataReader, new LibraryStore());
         IFolderPicker folderPicker = new FolderPicker();
+        IConfirmationPrompt confirmation = new ConfirmationPrompt();
         IBilibiliSource bilibiliSource = new BilibiliBridgeClient();
         LibVlcAudioPlayer audioPlayer = new();
 
@@ -49,6 +50,7 @@ public partial class App : Application
             lyricProvider,
             library,
             folderPicker,
+            confirmation,
             bilibiliSource,
             captionStore,
             audioPlayer);

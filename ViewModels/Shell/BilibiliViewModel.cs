@@ -46,6 +46,16 @@ public partial class BilibiliViewModel : ObservableObject
     public event EventHandler<Track>? TrackResolved;
 
     /// <summary>
+    /// Raised when a resolved stream should be remembered by the library.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="TrackResolved"/> because playing and remembering are different
+    /// concerns: the library owns persistence, and a stream that fails to save is still a stream
+    /// the user can listen to right now.
+    /// </remarks>
+    public event EventHandler<Track>? TrackPersisted;
+
+    /// <summary>
     /// Bilibili video id typed by the user.
     /// </summary>
     [ObservableProperty]
@@ -95,6 +105,7 @@ public partial class BilibiliViewModel : ObservableObject
             StatusMessage = $"Playing {track.Title}.";
 
             TrackResolved?.Invoke(this, track);
+            TrackPersisted?.Invoke(this, track);
         }
         catch (BilibiliSourceException exception)
         {
@@ -135,6 +146,8 @@ public partial class BilibiliViewModel : ObservableObject
 
             StatusMessage = $"Reloaded {refreshed.Title} after the link expired.";
             HasError = false;
+
+            TrackPersisted?.Invoke(this, refreshed);
 
             return refreshed;
         }

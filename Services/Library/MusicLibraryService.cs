@@ -57,15 +57,23 @@ public sealed class MusicLibraryService : IMusicLibraryService
     /// <inheritdoc />
     public async Task<IReadOnlyList<Track>> LoadAsync()
     {
-        string[] paths = await _store.LoadPathsAsync();
+        IReadOnlyList<LibraryEntry> entries = await _store.LoadEntriesAsync();
 
         // Paths are re-read one by one so a file deleted since the last session simply
-        // disappears from the library instead of breaking the restore.
-        var tracks = new List<Track>(paths.Length);
+        // disappears from the library instead of breaking the restore. Online entries need no
+        // disk access at all: their metadata is the cached copy, and the stream URL is resolved
+        // on demand.
+        var tracks = new List<Track>(entries.Count);
 
-        foreach (string path in paths)
+        foreach (LibraryEntry entry in entries)
         {
-            if (_metadataReader.ReadTrack(path) is { } track)
+            if (!entry.IsFile)
+            {
+                tracks.Add(entry.ToTrack());
+                continue;
+            }
+
+            if (_metadataReader.ReadTrack(entry.FilePath!) is { } track)
             {
                 tracks.Add(track);
             }
@@ -75,5 +83,5 @@ public sealed class MusicLibraryService : IMusicLibraryService
     }
 
     /// <inheritdoc />
-    public Task SaveAsync(IEnumerable<Track> tracks) => _store.SavePathsAsync(tracks);
+    public Task SaveAsync(IEnumerable<Track> tracks) => _store.SaveAsync(tracks);
 }

@@ -22,16 +22,22 @@ public partial class LibraryPageViewModel : ObservableObject
 {
     private readonly IMusicLibraryService _library;
     private readonly IFolderPicker _folderPicker;
+    private readonly IConfirmationPrompt _confirmation;
 
     /// <summary>
     /// Creates the page.
     /// </summary>
     /// <param name="library">Library facade used to scan, restore and persist.</param>
     /// <param name="folderPicker">Asks the user which folder to import.</param>
-    public LibraryPageViewModel(IMusicLibraryService library, IFolderPicker folderPicker)
+    /// <param name="confirmation">Asks the user before a destructive action.</param>
+    public LibraryPageViewModel(
+        IMusicLibraryService library,
+        IFolderPicker folderPicker,
+        IConfirmationPrompt confirmation)
     {
         _library = library;
         _folderPicker = folderPicker;
+        _confirmation = confirmation;
     }
 
     /// <summary>
@@ -222,17 +228,78 @@ public partial class LibraryPageViewModel : ObservableObject
     /// Removes every imported track and deletes the saved library.
     /// </summary>
     /// <remarks>
-    /// Only the index is deleted; the audio files on disk are never touched.
+    /// Only the index is deleted; the audio files on disk are never touched. The confirmation
+    /// exists because this is the one action in the app that cannot be undone: the index is
+    /// overwritten in place, so a mis-click means re-importing and re-scanning everything.
     /// </remarks>
     [RelayCommand(CanExecute = nameof(HasTracks))]
     private async Task ClearLibraryAsync()
     {
+        int count = Tracks.Count;
+
+        string question = count == 1
+            ? "Remove the only track from your library?\n\nThe audio file on disk is not deleted."
+            : $"Remove all {count} tracks from your library?\n\nThe audio files on disk are not deleted.";
+
+        if (!_confirmation.Confirm("Clear library", question))
+        {
+            StatusMessage = "Library left unchanged.";
+            return;
+        }
+
         Tracks.Clear();
         OnTracksChanged();
 
         await _library.SaveAsync(Tracks);
 
         StatusMessage = "Library cleared. Import a folder to start again.";
+    }
+
+    /// <summary>
+    /// Adds a resolved track to the library and saves it.
+    /// </summary>
+    /// <param name="track">Track to keep.</param>
+    /// <remarks>
+    /// Used by the shell when an online resolve succeeds, so an online track survives a restart.
+    /// Only the stream key is durable, which is why the saved row comes back needing a fresh URL.
+    /// Re-adding a track that is already present replaces the cached metadata instead of
+    /// duplicating the row, which is how a re-resolved title or thumbnail gets updated.
+    /// </remarks>
+    public async Task AddOrUpdateAsync(Track track)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+
+        if (LibraryEntry.FromTrack(track) is not { } entry)
+        {
+            // Neither a file nor a stream: the demo placeholder, which was never persistable.
+            return;
+        }
+
+        int existing = -1;
+
+        for (int index = 0; index < Tracks.Count; index++)
+        {
+            string? key = LibraryEntry.FromTrack(Tracks[index])?.Key;
+
+            if (string.Equals(key, entry.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                existing = index;
+                break;
+            }
+        }
+
+        if (existing >= 0)
+        {
+            Tracks[existing] = track;
+        }
+        else
+        {
+            Tracks.Add(track);
+        }
+
+        OnTracksChanged();
+
+        await _library.SaveAsync(Tracks);
     }
 
     /// <summary>

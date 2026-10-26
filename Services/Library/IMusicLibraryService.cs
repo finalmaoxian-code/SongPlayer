@@ -21,11 +21,18 @@ public interface IMusicLibraryService
     /// <summary>
     /// Restores the tracks that were saved by a previous session.
     /// </summary>
+    /// <remarks>
+    /// A restored online track has no <see cref="Track.StreamUri"/> yet: the URL expires, so it is
+    /// re-resolved from <see cref="Track.StreamKey"/> the first time the track is played.
+    /// </remarks>
     Task<IReadOnlyList<Track>> LoadAsync();
 
     /// <summary>
     /// Saves the library so the next session can restore it.
     /// </summary>
-    /// <param name="tracks">Tracks to persist; ones without a path are skipped.</param>
+    /// <param name="tracks">
+    /// Tracks to persist. Local files are stored as their path; online tracks as their stream key
+    /// plus the metadata read the last time they were resolved.
+    /// </param>
     Task SaveAsync(IEnumerable<Track> tracks);
 }

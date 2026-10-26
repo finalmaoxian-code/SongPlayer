@@ -125,6 +125,7 @@ SongPlayer/
 │   │   ├── AudioFileScanner.cs        │
 │   │   ├── ITrackMetadataReader.cs    │
 │   │   ├── TrackMetadataReader.cs     │
+│   │   ├── LibraryEntry.cs            │
 │   │   └── LibraryStore.cs            │
 │   └── Lyrics/                        │
 │       ├── ILyricProvider.cs          │
@@ -427,7 +428,8 @@ depend on.
 | `MusicLibraryService.cs` | 79 | Orchestration only: walks the scanner's output, asks the reader for tags, delegates persistence |
 | `IAudioFileScanner.cs` / `AudioFileScanner.cs` | 24 + 50 | Extension whitelist (mp3, flac, wav, m4a, aac, wma, ogg, opus — the set LibVLC decodes) and `Directory.EnumerateFiles` |
 | `ITrackMetadataReader.cs` / `TrackMetadataReader.cs` | 19 + 81 | TagLibSharp title/artist/duration/album/track number with an explicit exception whitelist, so one corrupt file cannot abort a scan |
-| `LibraryStore.cs` | 78 | `library.json` read/write with a temp-file-then-move atomic write |
+| `LibraryEntry.cs` | 118 | One persisted row: a local path, or an online stream key plus the metadata cached beside it. `FromTrack`/`ToTrack` convert to and from `Track`; `Key` is the de-duplication identity |
+| `LibraryStore.cs` | 143 | `library.json` read/write with a temp-file-then-move atomic write. Reads both the current object layout and the older `string[]` one, so an existing library keeps working |
 
 **`Storage/` (54 lines)** — `IFolderPicker.PickFolder(string title)` and `FolderPicker`,
 which implements it with `Microsoft.Win32.OpenFolderDialog`. The interface exists so
@@ -579,6 +581,14 @@ borderless window is maximized (see §7.5).
    pick a row ──► Library.PlayTrackCommand ──► TrackActivated ──► MainWindowViewModel
                      (ListBox selection)            (event)            ├─► PlayerBar.LoadTrack(track)
                                                                        └─► CurrentPage = Library
+
+   resolve a BV ──► Bilibili.PlayCommand ──► TrackResolved ──► PlayerBar.PlayTrack(track)
+                                        └──► TrackPersisted ──► Library.AddOrUpdateAsync
+                                                                    └─► LibraryStore.SaveAsync
+
+   clear ──► Library.ClearLibraryCommand ──► IConfirmationPrompt.Confirm
+                                                 ├─ No  ──► StatusMessage = "Library left unchanged."
+                                                 └─ Yes ──► Tracks.Clear() ──► LibraryStore.SaveAsync([])
 
    paste BV id ──► Bilibili.PlayCommand ──► IBilibiliSource
                      (IsBusy gate)            ├─► ProbeAsync  ("/health" - no bridge, no 20 s wait)
@@ -804,8 +814,8 @@ missing feature into a bug report.
 ### 7.10 The composition root is hand-written
 
 `App.xaml.cs` builds `AudioFileScanner`, `TrackMetadataReader`, `LibraryStore`,
-`MusicLibraryService`, `FolderPicker`, `BilibiliBridgeClient`, `LibVlcAudioPlayer` and
-`SampleLyricProvider`, then hands the services, `IBilibiliSource` and `IAudioPlayer` to
+`MusicLibraryService`, `FolderPicker`, `ConfirmationPrompt`, `BilibiliBridgeClient`,
+`LibVlcAudioPlayer` and `SampleLyricProvider`, then hands the services, `IBilibiliSource` and `IAudioPlayer` to
 `MainWindowViewModel` and wraps that in `MainWindow`.
 It then `await`s `Library.RestoreAsync()` *after* `Show()`, so a slow disk never delays the
 first frame. `App.xaml` no
@@ -908,15 +918,17 @@ up, and each one failed on its own during development:
 - **Online playback needs a second process.** Bilibili audio comes through the Node bridge in
   the sibling `SongPlayer.SourceLab` project; if it is not running, the page says so and local
   playback is unaffected. SongPlayer does not speak the Bilibili API itself.
-- **Streams cannot be saved.** An online track lives only for the current session: it is not
-  written to `library.json` (only `FilePath` is persisted), so reopening the app loses it. Its
-  subtitle lines *are* archived in `%LOCALAPPDATA%\SongPlayer\captions`, but nothing currently
-  lists that archive — it only replays when the same BV id is played again.
+- **Saved streams need one extra network round trip.** An online track is remembered by its
+  stream key, so it reappears after a restart with its cached title, uploader, length and
+  thumbnail — but a restored row carries no URL until it is selected, and selecting it resolves
+  the key again before loading. With the bridge down, that row cannot be played at all.
+  Subtitle lines are archived separately in `%LOCALAPPDATA%\SongPlayer\captions`.
 - **An unindexable stream has no seek range.** `sidx` gives the length for a normal Bilibili
   segment; a source that omits it shows `00:00` and a slider the engine refuses to move.
 - **The library is real but shallow.** Import, persistence and the track table work, yet there
-  is no search over it, no sort, no per-track removal (only `Clear library`), no progress report
-  for a very large folder, and no duplicate detection beyond the file path.
+  is no search over it, no sort, no per-track removal (only `Clear library`, which now asks for
+  confirmation but still has no undo), no progress report for a very large folder, and no
+  duplicate detection beyond the file path and the stream key.
 - **Local artwork is still a glyph.** Embedded tag pictures are not read; a local file shows the
   `ArtworkGlyph` frame. Only online tracks get a real image, because only they carry a URL.
 - **Subtitles are usually invisible.** Most Bilibili subtitle tracks are served only to a
@@ -994,9 +1006,10 @@ rather than in the view, so "no results" is a property such as `HasNoMatches` in
 library agree.
 
 **Remove a single track**
-De-duplication already lives in a `HashSet` on `FilePath`; removing a row is that operation
-reversed plus a `SaveAsync`. Never delete the audio file — `Clear library` documents that the
-index is the only thing SongPlayer deletes.
+De-duplication lives in `LibraryEntry.Key` (a path for a local file, a stream key for an online
+one); removing a row is that operation reversed plus a `SaveAsync`. Never delete the audio file —
+`Clear library` documents that the index is the only thing SongPlayer deletes. Ask
+`IConfirmationPrompt` first if the action is not obviously reversible.
 
 ---
 

@@ -57,8 +57,13 @@ public partial class PlayerBarViewModel : ObservableObject
     /// <summary>
     /// Creates the player bar without an audio engine, so it only tracks visual state.
     /// </summary>
+    /// <remarks>
+    /// The design-time bar preloads <see cref="Track.Sample"/> so the XAML designer and a bare
+    /// <c>new MainWindow()</c> show a populated bar instead of an empty one.
+    /// </remarks>
     public PlayerBarViewModel()
     {
+        CurrentTrack = Track.Sample;
     }
 
     /// <summary>
@@ -101,11 +106,16 @@ public partial class PlayerBarViewModel : ObservableObject
 
     /// <summary>
     /// Track shown in the player bar. <see cref="Track.Empty"/> means nothing is loaded.
-    /// The sample track is preloaded so the shell has something to show before the library is
-    /// imported; it carries no file path, so pressing play on it reports that it cannot be played.
     /// </summary>
+    /// <remarks>
+    /// The real player starts empty rather than on the demo track. A preloaded sample bar looked
+    /// friendlier, but it put a title, an album and a working play button on screen for audio that
+    /// does not exist — pressing play answered with an error, and after the library was cleared it
+    /// was the only thing left, which read as "everything is gone except this fake song". The demo
+    /// track is still preloaded by the engine-less constructor the designer uses.
+    /// </remarks>
     [ObservableProperty]
-    private Track currentTrack = Track.Sample;
+    private Track currentTrack = Track.Empty;
 
     /// <summary>
     /// Whether playback is currently running.

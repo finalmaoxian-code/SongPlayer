@@ -61,8 +61,15 @@ public partial class LibraryPageView : UserControl
     /// Selects the row of the loaded track without starting playback a second time.
     /// </summary>
     /// <remarks>
+    /// Matching is by identity rather than by object reference, because the mediator can replace
+    /// the track object it hands to the player bar: an online track is re-resolved before it is
+    /// loaded, so the row in the list and the loaded track are two instances of the same source.
+    /// A file is matched by path and an online source by stream key, which is the same rule the
+    /// store uses to de-duplicate.
+    /// <para>
     /// Clearing the selection when the track is not in the library (after "Clear library") matters
     /// as much as selecting it: a stale highlighted row would suggest a track that is gone.
+    /// </para>
     /// </remarks>
     private void SyncSelection()
     {
@@ -71,20 +78,44 @@ public partial class LibraryPageView : UserControl
             return;
         }
 
-        string? path = _shell.PlayerBar.CurrentTrack.FilePath;
-
         _isSyncingSelection = true;
 
         try
         {
-            TrackList.SelectedItem = path is null
-                ? null
-                : _shell.Library.Tracks.FirstOrDefault(track => track.FilePath == path);
+            TrackList.SelectedItem = FindRow(_shell.PlayerBar.CurrentTrack);
         }
         finally
         {
             _isSyncingSelection = false;
         }
+    }
+
+    /// <summary>
+    /// Finds the row that represents <paramref name="track"/>.
+    /// </summary>
+    /// <param name="track">Loaded track.</param>
+    /// <returns>The matching row, or <see langword="null"/> when the track is not in the list.</returns>
+    private Track? FindRow(Track track)
+    {
+        if (_shell is null)
+        {
+            return null;
+        }
+
+        foreach (Track row in _shell.Library.Tracks)
+        {
+            bool matches = track.FilePath is { Length: > 0 } path
+                ? string.Equals(row.FilePath, path, StringComparison.OrdinalIgnoreCase)
+                : !string.IsNullOrWhiteSpace(track.StreamKey)
+                    && string.Equals(row.StreamKey, track.StreamKey, StringComparison.OrdinalIgnoreCase);
+
+            if (matches)
+            {
+                return row;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
