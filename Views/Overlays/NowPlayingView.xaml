@@ -121,7 +121,7 @@
                                     Stroke="#1AFFFFFF"
                                     StrokeThickness="1" />
                                 <TextBlock
-                                    Text="{Binding ArtworkGlyph}"
+                                    Text="{Binding PlayerBar.ArtworkGlyph}"
                                     FontFamily="Segoe MDL2 Assets"
                                     FontSize="68"
                                     Foreground="{StaticResource AccentBrush}"
@@ -134,14 +134,14 @@
                     <!-- Track facts -->
                     <StackPanel Grid.Row="1">
                         <TextBlock
-                            Text="{Binding TrackTitle}"
+                            Text="{Binding PlayerBar.TrackTitle}"
                             FontSize="24"
                             FontWeight="SemiBold"
                             TextTrimming="CharacterEllipsis" />
 
                         <TextBlock
                             Margin="0,6,0,0"
-                            Text="{Binding TrackArtist}"
+                            Text="{Binding PlayerBar.TrackArtist}"
                             FontSize="14"
                             Foreground="{StaticResource AccentBrush}"
                             TextTrimming="CharacterEllipsis" />
@@ -149,13 +149,13 @@
                         <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
                             <Border Style="{StaticResource ChipStyle}">
                                 <TextBlock
-                                    Text="{Binding TrackAlbumPosition}"
+                                    Text="{Binding PlayerBar.TrackAlbumPosition}"
                                     Style="{StaticResource CaptionTextStyle}"
                                     Foreground="{StaticResource TextSecondaryBrush}" />
                             </Border>
                             <Border Margin="8,0,0,0" Style="{StaticResource ChipStyle}">
                                 <TextBlock
-                                    Text="{Binding TrackAlbum}"
+                                    Text="{Binding PlayerBar.TrackAlbum}"
                                     Style="{StaticResource CaptionTextStyle}"
                                     Foreground="{StaticResource TextSecondaryBrush}" />
                             </Border>
@@ -171,20 +171,20 @@
                         </Grid.ColumnDefinitions>
 
                         <TextBlock
-                            Text="{Binding PositionText}"
+                            Text="{Binding PlayerBar.PositionText}"
                             Style="{StaticResource CaptionTextStyle}"
                             VerticalAlignment="Center" />
 
                         <controls:SlimSlider
                             Grid.Column="1"
                             Margin="4,0"
-                            Maximum="{Binding DurationSeconds}"
-                            Value="{Binding PositionSeconds, Mode=TwoWay}"
+                            Maximum="{Binding PlayerBar.DurationSeconds}"
+                            Value="{Binding PlayerBar.PositionSeconds, Mode=TwoWay}"
                             VerticalAlignment="Center" />
 
                         <TextBlock
                             Grid.Column="2"
-                            Text="{Binding DurationText}"
+                            Text="{Binding PlayerBar.DurationText}"
                             HorizontalAlignment="Right"
                             Style="{StaticResource CaptionTextStyle}"
                             VerticalAlignment="Center" />
@@ -204,20 +204,20 @@
                         <Button
                             Margin="8,0,0,0"
                             Content="&#xE892;"
-                            IsEnabled="{Binding HasTrack}"
+                            IsEnabled="{Binding PlayerBar.HasTrack}"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Previous" />
                         <Button
                             Margin="10,0"
-                            Command="{Binding TogglePlaybackCommand}"
-                            Content="{Binding PlayPauseGlyph}"
+                            Command="{Binding PlayerBar.TogglePlaybackCommand}"
+                            Content="{Binding PlayerBar.PlayPauseGlyph}"
                             Style="{StaticResource PlayButtonStyle}"
                             ToolTipService.ShowOnDisabled="True"
-                            ToolTip="{Binding PlayPauseTooltip}" />
+                            ToolTip="{Binding PlayerBar.PlayPauseTooltip}" />
                         <Button
                             Margin="0,0,8,0"
                             Content="&#xE893;"
-                            IsEnabled="{Binding HasTrack}"
+                            IsEnabled="{Binding PlayerBar.HasTrack}"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTip="Next" />
                         <Button
@@ -243,7 +243,7 @@
                             Width="120"
                             Margin="10,0,0,0"
                             Maximum="100"
-                            Value="{Binding Volume, Mode=TwoWay}"
+                            Value="{Binding PlayerBar.Volume, Mode=TwoWay}"
                             VerticalAlignment="Center"
                             ToolTip="Volume" />
                     </StackPanel>
@@ -287,9 +287,9 @@
                     <ListBox
                         x:Name="LyricList"
                         Grid.Row="1"
-                        ItemsSource="{Binding Lyrics}"
+                        ItemsSource="{Binding NowPlaying.Lyrics}"
                         Style="{StaticResource LyricListStyle}"
-                        Visibility="{Binding HasLyrics, Converter={StaticResource BoolToVisibility}}">
+                        Visibility="{Binding NowPlaying.HasLyrics, Converter={StaticResource BoolToVisibility}}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <!-- The item template only renders text; padding and
@@ -314,7 +314,7 @@
                         Grid.Row="1"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Visibility="{Binding HasLyrics, Converter={StaticResource InverseBoolToVisibility}}">
+                        Visibility="{Binding NowPlaying.HasLyrics, Converter={StaticResource InverseBoolToVisibility}}">
                         <Border
                             Width="56"
                             Height="56"

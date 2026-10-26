@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using SongPlayer.ViewModels;
+using SongPlayer.ViewModels.Shell;
 
 namespace SongPlayer.Views.Overlays;
 
@@ -17,7 +18,7 @@ namespace SongPlayer.Views.Overlays;
 /// </remarks>
 public partial class NowPlayingView : UserControl
 {
-    private MainWindowViewModel? _viewModel;
+    private NowPlayingViewModel? _viewModel;
 
     /// <summary>Creates the view and starts tracking the shell view model.</summary>
     public NowPlayingView()
@@ -35,10 +36,13 @@ public partial class NowPlayingView : UserControl
         => AttachToViewModel(e.NewValue as MainWindowViewModel);
 
     /// <summary>
-    /// Swaps the property-change subscription over to the current view model.
+    /// Swaps the property-change subscription over to the karaoke view model of the current
+    /// shell view model.
     /// </summary>
-    private void AttachToViewModel(MainWindowViewModel? viewModel)
+    private void AttachToViewModel(MainWindowViewModel? shell)
     {
+        var viewModel = shell?.NowPlaying;
+
         if (ReferenceEquals(_viewModel, viewModel))
         {
             return;
@@ -62,7 +66,7 @@ public partial class NowPlayingView : UserControl
     /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(MainWindowViewModel.ActiveLyricIndex) || _viewModel is null)
+        if (e.PropertyName != nameof(NowPlayingViewModel.ActiveLyricIndex) || _viewModel is null)
         {
             return;
         }

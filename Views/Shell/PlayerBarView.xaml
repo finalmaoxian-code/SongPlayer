@@ -36,19 +36,19 @@
 
                 <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
                     <TextBlock
-                        Text="{Binding TrackTitle}"
+                        Text="{Binding PlayerBar.TrackTitle}"
                         FontSize="{StaticResource FontSizeBody}"
                         FontWeight="SemiBold" />
                     <TextBlock
                         Margin="0,4,0,0"
-                        Text="{Binding TrackArtist}"
+                        Text="{Binding PlayerBar.TrackArtist}"
                         Style="{StaticResource CaptionTextStyle}" />
                 </StackPanel>
 
                 <Button
                     Margin="14,0,0,0"
                     Content="&#xEB51;"
-                    IsEnabled="{Binding HasTrack}"
+                    IsEnabled="{Binding PlayerBar.HasTrack}"
                     Style="{StaticResource IconButtonStyle}"
                     ToolTip="Add to favorites" />
             </StackPanel>
@@ -69,22 +69,22 @@
                     <Button
                         Margin="6,0,0,0"
                         Content="&#xE892;"
-                        IsEnabled="{Binding HasTrack}"
+                        IsEnabled="{Binding PlayerBar.HasTrack}"
                         Style="{StaticResource IconButtonStyle}"
                         ToolTip="Previous" />
 
                     <Button
                         Margin="8,0"
-                        Command="{Binding TogglePlaybackCommand}"
-                        Content="{Binding PlayPauseGlyph}"
+                        Command="{Binding PlayerBar.TogglePlaybackCommand}"
+                        Content="{Binding PlayerBar.PlayPauseGlyph}"
                         Style="{StaticResource PlayButtonStyle}"
                         ToolTipService.ShowOnDisabled="True"
-                        ToolTip="{Binding PlayPauseTooltip}" />
+                        ToolTip="{Binding PlayerBar.PlayPauseTooltip}" />
 
                     <Button
                         Margin="0,0,6,0"
                         Content="&#xE893;"
-                        IsEnabled="{Binding HasTrack}"
+                        IsEnabled="{Binding PlayerBar.HasTrack}"
                         Style="{StaticResource IconButtonStyle}"
                         ToolTip="Next" />
 
@@ -103,20 +103,20 @@
                     </Grid.ColumnDefinitions>
 
                     <TextBlock
-                        Text="{Binding PositionText}"
+                        Text="{Binding PlayerBar.PositionText}"
                         Style="{StaticResource CaptionTextStyle}"
                         VerticalAlignment="Center" />
 
                     <controls:SlimSlider
                         Grid.Column="1"
                         Margin="4,0"
-                        Maximum="{Binding DurationSeconds}"
-                        Value="{Binding PositionSeconds, Mode=TwoWay}"
+                        Maximum="{Binding PlayerBar.DurationSeconds}"
+                        Value="{Binding PlayerBar.PositionSeconds, Mode=TwoWay}"
                         VerticalAlignment="Center" />
 
                     <TextBlock
                         Grid.Column="2"
-                        Text="{Binding DurationText}"
+                        Text="{Binding PlayerBar.DurationText}"
                         HorizontalAlignment="Right"
                         Style="{StaticResource CaptionTextStyle}"
                         VerticalAlignment="Center" />
@@ -138,7 +138,7 @@
                     Width="110"
                     Margin="6,0,0,0"
                     Maximum="100"
-                    Value="{Binding Volume, Mode=TwoWay}"
+                    Value="{Binding PlayerBar.Volume, Mode=TwoWay}"
                     VerticalAlignment="Center"
                     ToolTip="Volume" />
             </StackPanel>
