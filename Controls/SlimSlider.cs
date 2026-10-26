@@ -87,6 +87,17 @@ public sealed class SlimSlider : Slider
         set => SetValue(ThumbDiameterProperty, value);
     }
 
+    /// <summary>
+    /// Raised when the user starts and finishes dragging the bar, carrying the new drag state.
+    /// </summary>
+    /// <remarks>
+    /// The bound value already reports every intermediate position, so this event exists for a
+    /// different reason: while the user holds the bar, a bound owner that also mirrors a moving
+    /// playhead would fight the pointer for the thumb. With this signal the owner can suspend its
+    /// updates for the duration of the drag and resume on release.
+    /// </remarks>
+    public event EventHandler<bool>? DraggingChanged;
+
     static SlimSlider()
     {
         // Give the type its own default style key. Without this the control inherits
@@ -302,6 +313,7 @@ public sealed class SlimSlider : Slider
 
             _isDragging = value;
             InvalidateVisual();
+            DraggingChanged?.Invoke(this, value);
         }
     }
 

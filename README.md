@@ -54,7 +54,7 @@ SongPlayer/
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
 ├─ Models/                  Track, PlayerPage, LyricLine, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
-│  ├─ Audio/                IAudioPlayer + SilentAudioPlayer (placeholder engine)
+│  ├─ Audio/                IAudioPlayer + MediaPlayerAudioPlayer (real engine)
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
 │  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
 │  └─ Lyrics/               ILyricProvider + sample provider
@@ -82,8 +82,8 @@ SongPlayer/
 - **Services are injected, not constructed by UI code.** `App.xaml.cs` is the only place that
   names concrete types: it builds the scanner/tag-reader/store facade, an `IAudioPlayer` and an
   `ILyricProvider` and a folder picker, then hands them to the shell. No DI container — a
-  handful of objects with one lifetime do not justify one. Swapping the silent player for a
-  real engine is a single line there.
+  handful of objects with one lifetime do not justify one. Swapping the audio engine really
+  was a single line there.
 - **Design tokens first.** Colors, brushes, corner radii and font sizes are declared
   once in `Themes/Colors.xaml`. Views reference tokens rather than literal values, so
   retheming means editing one file. The style dictionaries are split by concern rather than
@@ -115,13 +115,18 @@ SongPlayer/
 ## Status
 
 Import works end to end: **Import folder** picks a directory, recursively scans it for
-`.mp3`/`.flac`/`.wav`/`.m4a`, reads title/artist/duration/album/track number through
+`.mp3`/`.wav`/`.m4a`/`.aac`/`.wma`, reads title/artist/duration/album/track number through
 TagLibSharp, de-duplicates by path and writes the index to `%LOCALAPPDATA%\SongPlayer` so the
 Local Music page is populated the next time you start the app. Clicking (or arrow-keying to)
-a row loads it into the player bar.
+a row loads it and starts playing it.
 
-Playback itself is still the silent `IAudioPlayer` placeholder, so `IsPlaying` is a flag and
-the position only moves when you seek or click a lyric line — the karaoke highlight follows
-that one property, so a real engine needs no view changes. `.lrc` parsing, cover art, search
-over the library, playlists and shuffle/repeat are the next milestones. Controls that are not
-yet implemented are visibly disabled rather than silently inert.
+Playback is real: `MediaPlayerAudioPlayer` wraps WPF's `MediaPlayer`, reports its position
+four times a second, and turns engine failures (missing file, unsupported format, seek error)
+into a visible message in the player bar instead of an exception or a silent no-op. Seeking is
+coalesced to ten requests a second so dragging the bar does not stutter the audio. FLAC is not
+in the importable list because Windows only decodes it with the optional media feature pack.
+
+There is no queue yet: a track ends where it ends, and the left transport button restarts the
+current track rather than stepping back through history. `.lrc` parsing, cover art, search over
+the library, playlists, a queue with next/shuffle/repeat are the next milestones. Controls
+that are not yet implemented are visibly disabled rather than silently inert.

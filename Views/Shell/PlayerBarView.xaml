@@ -38,11 +38,27 @@
                     <TextBlock
                         Text="{Binding PlayerBar.TrackTitle}"
                         FontSize="{StaticResource FontSizeBody}"
-                        FontWeight="SemiBold" />
+                        FontWeight="SemiBold"
+                        TextTrimming="CharacterEllipsis" />
+
+                    <!--
+                        The artist line doubles as the transport error line: a failed play has
+                        nowhere else to go in this shell, and the player bar is where the user
+                        just clicked.
+                    -->
                     <TextBlock
                         Margin="0,4,0,0"
                         Text="{Binding PlayerBar.TrackArtist}"
-                        Style="{StaticResource CaptionTextStyle}" />
+                        Style="{StaticResource CaptionTextStyle}"
+                        Visibility="{Binding PlayerBar.HasStatusMessage, Converter={StaticResource InverseBoolToVisibility}}" />
+                    <TextBlock
+                        Margin="0,4,0,0"
+                        Text="{Binding PlayerBar.StatusMessage}"
+                        FontSize="{StaticResource FontSizeCaption}"
+                        Foreground="{StaticResource CaptionCloseHoverBrush}"
+                        TextTrimming="CharacterEllipsis"
+                        ToolTip="{Binding PlayerBar.StatusMessage}"
+                        Visibility="{Binding PlayerBar.HasStatusMessage, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
 
                 <Button
@@ -68,10 +84,10 @@
 
                     <Button
                         Margin="6,0,0,0"
+                        Command="{Binding PlayerBar.RestartCommand}"
                         Content="&#xE892;"
-                        IsEnabled="{Binding PlayerBar.HasTrack}"
                         Style="{StaticResource IconButtonStyle}"
-                        ToolTip="Previous" />
+                        ToolTip="Restart track" />
 
                     <Button
                         Margin="8,0"
@@ -84,9 +100,9 @@
                     <Button
                         Margin="0,0,6,0"
                         Content="&#xE893;"
-                        IsEnabled="{Binding PlayerBar.HasTrack}"
+                        IsEnabled="False"
                         Style="{StaticResource IconButtonStyle}"
-                        ToolTip="Next" />
+                        ToolTip="Next (needs a queue)" />
 
                     <Button
                         Content="&#xE8EE;"
@@ -108,6 +124,7 @@
                         VerticalAlignment="Center" />
 
                     <controls:SlimSlider
+                        x:Name="SeekBar"
                         Grid.Column="1"
                         Margin="4,0"
                         Maximum="{Binding PlayerBar.DurationSeconds}"
@@ -130,10 +147,10 @@
                 Orientation="Horizontal"
                 VerticalAlignment="Center">
                 <Button
-                    Content="&#xE767;"
-                    IsEnabled="False"
+                    Command="{Binding PlayerBar.ToggleMuteCommand}"
+                    Content="{Binding PlayerBar.VolumeGlyph}"
                     Style="{StaticResource IconButtonStyle}"
-                    ToolTip="Mute" />
+                    ToolTip="{Binding PlayerBar.MuteTooltip}" />
                 <controls:SlimSlider
                     Width="110"
                     Margin="6,0,0,0"

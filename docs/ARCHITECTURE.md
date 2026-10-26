@@ -40,8 +40,8 @@ unimplemented controls are visibly disabled.
 | UI framework | WPF, `net10.0-windows`, `UseWPF=true` |
 | Language settings | `Nullable=enable`, `ImplicitUsings=enable` |
 | Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0 |
-| C# source | 37 files, 2,667 lines (33% comment lines) |
-| XAML | 17 files, 1,941 lines |
+| C# source | 38 files, 3,276 lines (33% comment lines) |
+| XAML | 17 files, 1,958 lines |
 | Window | 1180×760 default, 900×600 minimum, borderless with a custom caption |
 | Theme | Dark only, token-driven |
 | Build status | `dotnet build` → 0 warnings, 0 errors |
@@ -99,7 +99,7 @@ SongPlayer/
 ├── Services/                         ─┐
 │   ├── Audio/                         │  LAYER 5 — Services
 │   │   ├── IAudioPlayer.cs            │  (interfaces + implementations;
-│   │   └── SilentAudioPlayer.cs       │   no view, no WPF types)
+│   │   └── MediaPlayerAudioPlayer.cs  │   no view, no WPF types)
 │   ├── Library/                       │
 │   │   ├── IMusicLibraryService.cs    │
 │   │   ├── MusicLibraryService.cs     │
@@ -257,16 +257,22 @@ parent (§7.11). All use
   `OnLibraryTrackActivated` turns a library selection into `PlayerBar.LoadTrack(track)` and a
   navigation to the library page. Neither child knows the other exists.
 
-**`ViewModels/Shell/PlayerBarViewModel.cs` (216 lines)** — transport plus track metadata, and
-the single source of truth for the playback position.
+**`ViewModels/Shell/PlayerBarViewModel.cs` (421 lines)** — transport plus track metadata, and
+the single place the playback position is published from.
 
 - **Input state**: `CurrentTrack` (`Track.Sample` by default), `IsPlaying`, `PositionSeconds`,
-  `Volume` (70).
+  `Volume` (70), `StatusMessage`.
 - **Derived state**: `HasTrack`, `TrackTitle`, `TrackArtist`, `TrackAlbum`,
   `TrackAlbumPosition`, `ArtworkGlyph`, `DurationSeconds`, `DurationText`, `PositionText`,
-  `PlayPauseGlyph`, `PlayPauseTooltip`.
-- **Commands**: `TogglePlayback` (gated by `HasTrack`), which also drives the injected
-  `IAudioPlayer`; `OnPositionSecondsChanged` forwards seeks to the same interface.
+  `PlayPauseGlyph`, `PlayPauseTooltip`, `HasStatusMessage`, `IsMuted`, `VolumeGlyph`,
+  `MuteTooltip`.
+- **Commands**: `TogglePlayback` (gated by `HasTrack`), `Restart` (same gate), `ToggleMute`.
+- **Engine contract**: subscribes to `PositionChanged` / `PlaybackEnded` / `PlaybackFailed` in
+  the constructor. `_isApplyingEnginePosition` marks the assignments that came *from* the
+  engine so `OnPositionSecondsChanged` does not echo them back as a seek;
+  `SetSeeking(bool)` (called by the view on `SlimSlider.DraggingChanged`) makes the pointer
+  win during a drag and issues one seek on release. A failed play becomes `StatusMessage`
+  instead of an exception.
 - **Entry points**: `LoadTrack(track)` (stop, rewind, swap the record) and `PlayTrack(track)`
   (the former plus `Play`), used by the shell when a library row is chosen. The position is
   reset *before* the record swap so the seek slider never spans the old and new duration.
@@ -337,10 +343,26 @@ scan flow untestable and would drag a UI type into a view model.
 placeholder lines, one every 12 s). This seam exists so an `.lrc` parser drops in without
 touching a view or a view model.
 
-**`Audio/` (95 lines)** — `IAudioPlayer` (`IsPlaying`, `Play`, `Pause`, `Stop`, `Seek`) and
-`SilentAudioPlayer`, which records the requested state without producing sound. The view
-models depend on the interface only, so a real engine swaps in without touching the views
-(§9).
+**`Audio/` (435 lines)** — `IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`,
+`Seek`, plus `PositionChanged` / `PlaybackEnded` / `PlaybackFailed`) and
+`MediaPlayerAudioPlayer`, the real engine: a `System.Windows.Media.MediaPlayer` wrapped so the
+view models never see a WPF media type. Three details carry the design:
+
+- **The engine owns the playhead.** A 250 ms `DispatcherTimer` samples
+  `MediaPlayer.Position` and publishes it; `PlayerBarViewModel` marks those assignments so they
+  are never echoed back as seeks. A second user seek would fight the clock, so the write path
+  is one-directional per source.
+- **Seeks are coalesced to 10/s.** A `SlimSlider` drag produces a seek per pixel, and each one
+  flushes `MediaPlayer`'s buffer; the engine parks the requested position in
+  `_pendingPosition` and applies it on a 100 ms timer instead. A position is also applied
+  immediately on `MediaOpened`, because a resume point has to exist before the first frame.
+- **Failures are values, not exceptions.** `MediaFailed`, a missing `FilePath` and a file that
+  vanished from disk all raise `PlaybackFailed` with a sentence; `PlayerBarViewModel` turns it
+  into `StatusMessage`, which the player bar shows in place of the artist line. The shell has
+  no toast layer, and the bar is where the user just clicked.
+
+`MediaPlayer` has UI-thread affinity and is created in `App.OnStartup`, which is also why
+`App.OnExit` disposes it — an open media keeps a WASAPI stream alive (§7.10).
 
 ### 4.6 Layer 6 — Platform interop (`Interop/`)
 
@@ -376,7 +398,9 @@ borderless window is maximized (see §7.5).
                      (ListBox selection)            (event)            ├─► PlayerBar.LoadTrack(track)
                                                                        └─► CurrentPage = Library
 
-   drag seek ──► PlayerBar.PositionSeconds ──┬─► IAudioPlayer.Seek
+   engine clock ──► IAudioPlayer.PositionChanged ──► PlayerBar.PositionSeconds (guarded)
+                                                          (or: drag seek, same property)
+   drag seek ──► PlayerBar.PositionSeconds ──┬─► IAudioPlayer.Seek (drag release only)
                                              ├─► PositionText ──► time label
                                              ├─► seek slider Value (TwoWay)
                                              └─► MainWindowViewModel.OnPlayerBarPropertyChanged
@@ -395,9 +419,11 @@ Notable binding decisions:
   models without nested `DataContext`s keep the routing visible in the XAML — a typo shows up
   in the binding path instead of silently resolving against the wrong object.
 - `PositionSeconds` is the **single source of truth** for the playback position. The slider,
-  both time labels, the karaoke highlight and the engine seek all derive from it, and the
-  engine is never asked to advance it — so there is exactly one write path per gesture and no
-  feedback loop between the two child view models.
+  both time labels, the karaoke highlight and the engine seek all derive from it. It has two
+  writers and they never overlap: the engine's `PositionChanged` while it plays, and the
+  user's drag. `_isApplyingEnginePosition` marks engine writes so they do not loop back as
+  seeks, and `_isSeeking` (fed by `SlimSlider.DraggingChanged`) makes the pointer win while
+  the bar is held; the single seek happens on release.
 - `Value="{Binding PlayerBar.PositionSeconds, Mode=TwoWay}"` on **both** seek sliders.
   One-way binding was the original choice and it was a bug: dragging moved the painted fill but
   never the view model, so the time label and the lyric highlight desynchronised.
@@ -427,15 +453,16 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Lyric sheet with karaoke highlight | ✅ | `ViewModels/Shell/NowPlayingViewModel.cs`, `Themes/NowPlaying.xaml` | Highlight logic is real, driven by `PositionSeconds` |
 | Click a lyric line to seek | ✅ | `Views/Overlays/NowPlayingView.xaml.cs` + `MainWindowViewModel` | |
 | Custom-drawn slider (seek + volume) | ✅ | `Controls/SlimSlider.cs` | Click, drag, hover thumb |
-| Play / pause | 🟡 | `PlayerBarViewModel.TogglePlayback` → `IAudioPlayer` | Command and engine call are real; the shipped engine is silent |
-| Playback position advancing | ⛔ | — | `PositionSeconds` only changes by seeking; the engine reports no clock yet |
+| Play / pause | ✅ | `PlayerBarViewModel.TogglePlayback` → `MediaPlayerAudioPlayer` | Glyph follows `IsPlaying`, which follows the engine |
+| Playback position advancing | ✅ | `Services/Audio/MediaPlayerAudioPlayer.cs` | 250 ms clock into `PositionSeconds`; the lyric highlight and both labels follow it |
 | Search filtering | ⛔ | `MainWindowViewModel.SearchText` | Box is bound but nothing consumes the text |
 | Library scanning / import folder | ✅ | `ViewModels/Pages/LibraryPageViewModel.cs` + `Services/Library/` | Folder picker → recursive scan → tag read → dedupe → `library.json`; both "Import folder" buttons are live |
-| Audio decoding & output | ⛔ | `Services/Audio/` | `IAudioPlayer` exists; `SilentAudioPlayer` is the only implementation |
+| Audio decoding & output | ✅ | `Services/Audio/MediaPlayerAudioPlayer.cs` | WPF `MediaPlayer`; mp3/wav/wma/m4a/aac. FLAC is excluded from the scanner because Windows only decodes it with the optional media feature pack |
 | Tag reading | ✅ | `Services/Library/TrackMetadataReader.cs` | Title/artist/duration/album/track number feed both the table and the player bar; cover art is still an `ArtworkGlyph` |
 | `.lrc` parsing | ⛔ | `Services/Lyrics/` | `ILyricProvider` is the swap-in point |
 | Playlists | ⛔ | — | Nav entry disabled |
-| Favourites, recently played, shuffle, repeat, next/previous | ⛔ | — | Buttons disabled or non-committal |
+| Restart track, mute, volume | ✅ | `PlayerBarViewModel` | No queue exists, so the left transport button restarts the current track; mute is derived from `Volume` rather than stored |
+| Favourites, recently played, shuffle, repeat, next | ⛔ | — | Buttons disabled; `next` says why in its tooltip |
 | Settings / persistence | ⛔ | — | Nothing is written to disk |
 
 Rough measure of "how much is real": **all of the presentation layer and all of the
@@ -536,7 +563,7 @@ missing feature into a bug report.
 ### 7.10 The composition root is hand-written
 
 `App.xaml.cs` builds `AudioFileScanner`, `TrackMetadataReader`, `LibraryStore`,
-`MusicLibraryService`, `FolderPicker`, `SilentAudioPlayer` and `SampleLyricProvider`, then
+`MusicLibraryService`, `FolderPicker`, `MediaPlayerAudioPlayer` and `SampleLyricProvider`, then
 hands the services and `IAudioPlayer` to `MainWindowViewModel` and wraps that in `MainWindow`.
 It then `await`s `Library.RestoreAsync()` *after* `Show()`, so a slow disk never delays the
 first frame. `App.xaml` no
@@ -545,8 +572,12 @@ longer declares `StartupUri`, so the window is created after the services exist,
 graph is six types deep and has no scopes, lifetimes or configurability to speak of; a
 container would add a package, a registration file and a runtime indirection floor to save
 about ten lines of explicit `new`. And because every construction site names a concrete type,
-swapping `SilentAudioPlayer` for a real engine is one line in one place — which is the actual
-reason for having a composition root here.
+swapping the audio engine really was one line in one place — which is the actual reason for
+having a composition root here.
+
+`App` also keeps the engine as a field and disposes it in `OnExit`: the `MediaPlayer` inside
+holds a WASAPI stream open until it is closed, so the object graph's owner is the only place
+that can release it in the right order.
 
 Two deliberate consequences: the view models never call `new` on a service (they take
 interfaces), and the parameterless `MainWindowViewModel()` overload still exists but only for
@@ -569,9 +600,12 @@ because for exactly one message type it trades a greppable method for a hidden p
 
 ## 8. Known limitations
 
-- **No audio.** `IsPlaying` is a flag; `PositionSeconds` never advances on its own, so the
-  karaoke highlight only moves when you seek or click a lyric line. `IAudioPlayer` is the
-  seam, and its current implementation is silent by design (§4.5).
+- **Playback is one track at a time.** There is no queue: finishing a track stops at its end,
+  and the left transport button restarts the current track instead of going back in history
+  (§4.5). Shuffle, repeat and next need a queue before they can mean anything.
+- **FLAC is not importable.** The engine is WPF `MediaPlayer`, which decodes mp3/wav/wma/m4a/
+  aac but only reads FLAC when the optional Windows media feature pack is installed, so the
+  scanner leaves `.flac` out rather than importing rows that fail on the first click.
 - **The library is real but shallow.** Import, persistence and the track table work, yet there
   is no search over it, no sort, no per-track removal (only `Clear library`), no progress report
   for a very large folder, and no duplicate detection beyond the file path.
@@ -602,17 +636,18 @@ The seams are deliberate; each of the following is a local change.
    `Visibility` to `IsXSelected`, register it in `MainWindow.xaml` with `Grid.Row="1"`, and
    add a `RadioButton` to `Views/Shell/SidebarView.xaml`.
 
-**Wire real playback**
-`IAudioPlayer` already exists and `PlayerBarViewModel` already calls it from both
-`TogglePlayback` and `OnPositionSecondsChanged`; the shipped implementation is
-`SilentAudioPlayer`. So the work is:
-1. Write an `NAudio`-backed `IAudioPlayer` (or a `MediaPlayer` wrapper) and construct it in
-   `App.xaml.cs` instead of `SilentAudioPlayer`. Nothing else in the graph changes.
-2. Have that engine report its position — e.g. a `PositionChanged` event that
-   `PlayerBarViewModel` writes into `PositionSeconds`. Everything downstream (label, slider,
-   lyric highlight, `ActiveLyricIndex` → scroll) already works off that one property.
-3. Drive `IsPlaying` from the engine's state rather than from the click, so the glyph cannot
-   lie.
+**Play a whole album (add a queue)**
+The engine plays one file at a time and reports `PlaybackEnded`. A queue is a new
+`PlayerQueue` service owning an ordered list plus a cursor, constructed in `App.xaml.cs` and
+injected into `PlayerBarViewModel`; `OnEnginePlaybackEnded` then asks it for the next track
+and calls `PlayTrack`, and it becomes the `CanExecute` gate for `next`/`previous`/`shuffle`/
+`repeat`. Nothing in the views changes except the disabled flags on those four buttons.
+
+**Swap the engine for FLAC support**
+`IAudioPlayer` is the only contract the view models know. To decode formats `MediaPlayer`
+cannot, write an `NAudio`-backed implementation and construct it in `App.xaml.cs` instead of
+`MediaPlayerAudioPlayer` — then add `.flac` back in `AudioFileScanner`. Two files, no view
+changes.
 
 **Load real lyrics**
 Implement `ILyricProvider` with an `.lrc` parser that produces `LyricLine` values and construct

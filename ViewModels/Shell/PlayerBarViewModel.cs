@@ -13,6 +13,12 @@ namespace SongPlayer.ViewModels.Shell;
 /// slider, the position label and the karaoke highlight all derive from it. Nothing else in the
 /// shell is allowed to hold a second copy of the position, otherwise the views drift apart while
 /// the user drags the slider.
+/// <para>
+/// Once an engine is attached it owns the playhead: the engine's position reports are copied into
+/// <see cref="PositionSeconds"/>, and a position change that came from the engine is not handed
+/// back to it as a seek. Without that distinction the timer's own reports would seek the engine
+/// four times a second and playback would stutter in place.
+/// </para>
 /// </remarks>
 public partial class PlayerBarViewModel : ObservableObject
 {
@@ -23,6 +29,24 @@ public partial class PlayerBarViewModel : ObservableObject
     private readonly IAudioPlayer? _audioPlayer;
 
     /// <summary>
+    /// True while <see cref="PositionSeconds"/> is being assigned from an engine report, which
+    /// marks the assignment as "not a user seek".
+    /// </summary>
+    private bool _isApplyingEnginePosition;
+
+    /// <summary>Volume to restore when the user unmutes.</summary>
+    private double _volumeBeforeMute = 70;
+
+    /// <summary>
+    /// True while the user is holding the seek bar.
+    /// </summary>
+    /// <remarks>
+    /// While true the engine's position reports are ignored: the pointer, not the playhead, owns
+    /// the thumb during a drag, and letting both write the value makes it jitter under the cursor.
+    /// </remarks>
+    private bool _isSeeking;
+
+    /// <summary>
     /// Creates the player bar without an audio engine, so it only tracks visual state.
     /// </summary>
     public PlayerBarViewModel()
@@ -30,21 +54,43 @@ public partial class PlayerBarViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Creates the player bar that forwards transport commands to <paramref name="audioPlayer"/>.
+    /// Creates the player bar that forwards transport commands to <paramref name="audioPlayer"/>
+    /// and mirrors the playhead it reports.
     /// </summary>
     /// <param name="audioPlayer">Engine that turns the commands into actual playback.</param>
-    public PlayerBarViewModel(IAudioPlayer audioPlayer) => _audioPlayer = audioPlayer;
+    public PlayerBarViewModel(IAudioPlayer audioPlayer)
+    {
+        ArgumentNullException.ThrowIfNull(audioPlayer);
+
+        _audioPlayer = audioPlayer;
+        _audioPlayer.Volume = Volume;
+        _audioPlayer.PositionChanged += OnEnginePositionChanged;
+        _audioPlayer.PlaybackEnded += OnEnginePlaybackEnded;
+        _audioPlayer.PlaybackFailed += OnEnginePlaybackFailed;
+    }
+
+    /// <summary>
+    /// Message shown to the user when the engine could not play the loaded track, or <c>null</c>
+    /// when the last transport action succeeded.
+    /// </summary>
+    [ObservableProperty]
+    private string? statusMessage;
+
+    /// <summary>
+    /// Raised when the engine could not play the loaded track, carrying a message fit for the UI.
+    /// </summary>
+    public bool HasStatusMessage => !string.IsNullOrEmpty(StatusMessage);
 
     /// <summary>
     /// Track shown in the player bar. <see cref="Track.Empty"/> means nothing is loaded.
-    /// The sample track is preloaded so the player bar and the Now Playing page can be
-    /// reviewed before the audio engine exists.
+    /// The sample track is preloaded so the shell has something to show before the library is
+    /// imported; it carries no file path, so pressing play on it reports that it cannot be played.
     /// </summary>
     [ObservableProperty]
     private Track currentTrack = Track.Sample;
 
     /// <summary>
-    /// Whether playback is currently running. Purely visual until the audio engine lands.
+    /// Whether playback is currently running.
     /// </summary>
     [ObservableProperty]
     private bool isPlaying;
@@ -111,6 +157,25 @@ public partial class PlayerBarViewModel : ObservableObject
     public string DurationText => FormatTime(CurrentTrack.Duration);
 
     /// <summary>
+    /// True when the volume slider is at zero.
+    /// </summary>
+    /// <remarks>
+    /// Derived from <see cref="Volume"/> instead of stored: a separate flag could disagree with
+    /// the slider after the user drags it, and one source of truth is cheaper than reconciling two.
+    /// </remarks>
+    public bool IsMuted => Volume <= 0;
+
+    /// <summary>
+    /// Glyph of the volume button, matching the current loudness.
+    /// </summary>
+    public string VolumeGlyph => IsMuted ? "\uE74F" : Volume < 50 ? "\uE993" : "\uE995";
+
+    /// <summary>
+    /// Tooltip of the volume button.
+    /// </summary>
+    public string MuteTooltip => IsMuted ? "Unmute" : "Mute";
+
+    /// <summary>
     /// Glyph of the play/pause button (Segoe MDL2 Assets codes).
     /// </summary>
     public string PlayPauseGlyph => IsPlaying ? "\uE769" : "\uE768";
@@ -135,6 +200,7 @@ public partial class PlayerBarViewModel : ObservableObject
 
         IsPlaying = false;
         PositionSeconds = 0;
+        StatusMessage = null;
         CurrentTrack = track;
 
         _audioPlayer?.Stop();
@@ -160,6 +226,7 @@ public partial class PlayerBarViewModel : ObservableObject
     private void TogglePlayback()
     {
         IsPlaying = !IsPlaying;
+        StatusMessage = null;
 
         if (IsPlaying)
         {
@@ -185,6 +252,39 @@ public partial class PlayerBarViewModel : ObservableObject
         OnPropertyChanged(nameof(DurationSeconds));
         OnPropertyChanged(nameof(DurationText));
         TogglePlaybackCommand.NotifyCanExecuteChanged();
+        RestartCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Restarts the loaded track from the beginning.
+    /// </summary>
+    /// <remarks>
+    /// The player has no queue yet, so the previous/next buttons have nothing to step to. Restart
+    /// is what the transport can honestly promise today.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasTrack))]
+    private void Restart()
+    {
+        PositionSeconds = 0;
+        IsPlaying = true;
+        StatusMessage = null;
+        _audioPlayer?.Play(CurrentTrack, TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Mutes the output, or restores the last audible volume.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleMute()
+    {
+        if (Volume > 0)
+        {
+            _volumeBeforeMute = Volume;
+            Volume = 0;
+            return;
+        }
+
+        Volume = _volumeBeforeMute > 0 ? _volumeBeforeMute : 70;
     }
 
     /// <summary>
@@ -201,13 +301,118 @@ public partial class PlayerBarViewModel : ObservableObject
     /// </summary>
     /// <remarks>
     /// A slider drag raises this for every pixel, so the engine is asked to seek continuously
-    /// rather than once on release; a real engine is expected to coalesce those seeks.
+    /// rather than once on release; the engine coalesces those seeks.
+    /// <para>
+    /// Assignments that came from the engine are skipped, otherwise the engine would be told to
+    /// seek to the position it just reported.
+    /// </para>
     /// </remarks>
     partial void OnPositionSecondsChanged(double value)
     {
         OnPropertyChanged(nameof(PositionText));
+
+        if (_isApplyingEnginePosition)
+        {
+            return;
+        }
+
         _audioPlayer?.Seek(TimeSpan.FromSeconds(value));
     }
+
+    /// <summary>
+    /// Forwards the volume to the engine so the slider actually changes the loudness.
+    /// </summary>
+    partial void OnVolumeChanged(double value)
+    {
+        _audioPlayer?.Volume = value;
+
+        // Mute state and the button glyph both read the volume, so one assignment updates three
+        // visual states.
+        OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(nameof(VolumeGlyph));
+        OnPropertyChanged(nameof(MuteTooltip));
+    }
+
+    /// <summary>
+    /// Tells the player bar whether the user is currently dragging the seek bar, so the engine's
+    /// position reports stop competing with the pointer.
+    /// </summary>
+    /// <param name="isSeeking">True when a drag starts, false when it ends.</param>
+    /// <remarks>
+    /// The view calls this because drag state is a property of the control, not of the playback
+    /// model. On release the engine is asked to seek once, to the final value the user chose.
+    /// </remarks>
+    public void SetSeeking(bool isSeeking)
+    {
+        if (_isSeeking == isSeeking)
+        {
+            return;
+        }
+
+        _isSeeking = isSeeking;
+
+        if (!isSeeking)
+        {
+            _audioPlayer?.Seek(TimeSpan.FromSeconds(PositionSeconds));
+        }
+    }
+
+    /// <summary>
+    /// Copies the playhead reported by the engine into <see cref="PositionSeconds"/>.
+    /// </summary>
+    private void OnEnginePositionChanged(object? sender, TimeSpan position)
+    {
+        if (_isSeeking)
+        {
+            return;
+        }
+
+        _isApplyingEnginePosition = true;
+
+        try
+        {
+            PositionSeconds = position.TotalSeconds;
+        }
+        finally
+        {
+            _isApplyingEnginePosition = false;
+        }
+    }
+
+    /// <summary>
+    /// Leaves the playhead at the end of the track when it finishes. Advancing to the next track
+    /// is queue behaviour the shell does not have yet, so the bar simply stops.
+    /// </summary>
+    private void OnEnginePlaybackEnded(object? sender, EventArgs e)
+    {
+        IsPlaying = false;
+
+        _isApplyingEnginePosition = true;
+
+        try
+        {
+            PositionSeconds = CurrentTrack.Duration.TotalSeconds;
+        }
+        finally
+        {
+            _isApplyingEnginePosition = false;
+        }
+    }
+
+    /// <summary>
+    /// Stops the visual play state and publishes the engine's message so the shell can show it.
+    /// </summary>
+    private void OnEnginePlaybackFailed(object? sender, string message)
+    {
+        IsPlaying = false;
+        StatusMessage = message;
+    }
+
+    /// <summary>
+    /// Clears a previous failure message as soon as the user retries, so a stale error cannot
+    /// outlive the action that fixed it.
+    /// </summary>
+    partial void OnStatusMessageChanged(string? value) => OnPropertyChanged(nameof(HasStatusMessage));
 
     /// <summary>
     /// Formats a duration as <c>m:ss</c> or <c>h:mm:ss</c> for long tracks.
