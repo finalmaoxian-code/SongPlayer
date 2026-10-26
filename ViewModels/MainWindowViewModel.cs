@@ -3,6 +3,7 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
+using SongPlayer.Services.Lyrics;
 
 namespace SongPlayer.ViewModels;
 
@@ -17,10 +18,30 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>
     /// Creates the shell view model with the sample track and its lyrics already loaded.
     /// </summary>
+    /// <remarks>
+    /// The parameterless overload is what XAML instantiates; it uses the sample lyric provider
+    /// so the shell is self-contained until the composition root constructs it with real
+    /// services.
+    /// </remarks>
     public MainWindowViewModel()
+        : this(new SampleLyricProvider())
     {
+    }
+
+    /// <summary>
+    /// Creates the shell view model with the sample track and its lyrics already loaded.
+    /// </summary>
+    /// <param name="lyricProvider">Source of the timed lyrics shown on the Now Playing page.</param>
+    public MainWindowViewModel(ILyricProvider lyricProvider)
+    {
+        _lyricProvider = lyricProvider;
         LoadLyrics();
     }
+
+    /// <summary>
+    /// Source of the timed lyrics for the loaded track.
+    /// </summary>
+    private readonly ILyricProvider _lyricProvider;
 
     /// <summary>
     /// Currently displayed page. Changing it refreshes the derived navigation flags.
@@ -299,8 +320,8 @@ public partial class MainWindowViewModel : ObservableObject
     /// Rebuilds the lyric rows for the loaded track and resets the highlight.
     /// </summary>
     /// <remarks>
-    /// Until the <c>.lrc</c> parser exists the rows come from <see cref="SampleLyrics"/>, so
-    /// every track shares the same placeholder lyrics.
+    /// The lines themselves come from <see cref="ILyricProvider"/>; while the sample provider
+    /// is in place only the demo track has lyrics, so real files show the empty hint.
     /// </remarks>
     private void LoadLyrics()
     {
@@ -308,7 +329,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (HasTrack)
         {
-            foreach (var line in SampleLyrics.ForSampleTrack)
+            foreach (var line in _lyricProvider.GetLyrics(CurrentTrack))
             {
                 Lyrics.Add(new LyricLineViewModel(line));
             }

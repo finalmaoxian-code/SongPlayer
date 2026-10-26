@@ -38,6 +38,11 @@
             UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
 
+    <!--
+        The shell view model is instantiated here so the window keeps a single DataContext and
+        the child views inherit it. Its dependencies default to the sample implementations;
+        the composition root will construct it explicitly once services are wired up.
+    -->
     <Window.DataContext>
         <vm:MainWindowViewModel />
     </Window.DataContext>
