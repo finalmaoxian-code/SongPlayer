@@ -38,9 +38,9 @@ in the UI pretends to work — unimplemented controls are visibly disabled.
 | --- | --- |
 | UI framework | WPF, `net10.0-windows`, `UseWPF=true` |
 | Language settings | `Nullable=enable`, `ImplicitUsings=enable` |
-| Only NuGet dependency | `CommunityToolkit.Mvvm` 8.4.2 |
-| C# source | 12 files, 1,164 lines (30% comment lines) |
-| XAML | 4 files, 1,622 lines |
+| Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0 |
+| C# source | 32 files, 2,043 lines (34% comment lines) |
+| XAML | 16 files, 1,712 lines |
 | Window | 1180×760 default, 900×600 minimum, borderless with a custom caption |
 | Theme | Dark only, token-driven |
 | Build status | `dotnet build` → 0 warnings, 0 errors |
@@ -54,49 +54,86 @@ in the UI pretends to work — unimplemented controls are visibly disabled.
 SongPlayer/
 │
 ├── App.xaml                          ─┐
-├── App.xaml.cs                        │  Application composition root
-├── AssemblyInfo.cs                   ─┘
+├── App.xaml.cs                        │  Composition root
+├── AssemblyInfo.cs                   ─┘  (builds the services, hands the shell VM to the window)
 │
 ├── Themes/                           ─┐
 │   ├── Colors.xaml                    │  LAYER 1 — Design system
-│   └── Controls.xaml                  │  (no logic, only tokens + styles)
-│                                      ─┘
+│   ├── Typography.xaml                │  (no logic, only tokens + styles)
+│   ├── Surfaces.xaml                  │
+│   ├── Buttons.xaml                   │
+│   ├── Inputs.xaml                    │
+│   ├── Navigation.xaml                │
+│   └── NowPlaying.xaml               ─┘
+│
 ├── MainWindow.xaml                   ─┐
-├── MainWindow.xaml.cs                 │  LAYER 2 — View
-├── Controls/SlimSlider.cs             │  (layout, templates, window chrome)
+├── MainWindow.xaml.cs                 │
+├── Views/                             │  LAYER 2 — View
+│   ├── CaptionChrome.cs               │  (layout, templates, chrome, code-behind)
+│   ├── Shell/                         │
+│   │   ├── CaptionBarView.xaml        │
+│   │   ├── SidebarView.xaml           │
+│   │   ├── PageHeaderView.xaml        │
+│   │   └── PlayerBarView.xaml         │
+│   ├── Pages/                         │
+│   │   ├── HomePageView.xaml          │
+│   │   └── LibraryPageView.xaml       │
+│   └── Overlays/                      │
+│       └── NowPlayingView.xaml        │
+├── Controls/SlimSlider.cs             │
 ├── Converters/BoolToVisibilityConverter.cs
 │                                      ─┘
 ├── ViewModels/                       ─┐
 │   ├── MainWindowViewModel.cs         │  LAYER 3 — Presentation state
-│   └── LyricLineViewModel.cs          │  (all UI state + commands)
+│   ├── Shell/                         │  (all UI state + commands;
+│   │   ├── PlayerBarViewModel.cs      │   MainWindowViewModel mediates between
+│   │   └── NowPlayingViewModel.cs     │   the two child view models)
+│   └── LyricLineViewModel.cs          │
 │                                      ─┘
 ├── Models/                           ─┐
 │   ├── Track.cs                       │  LAYER 4 — Domain data
 │   ├── PlayerPage.cs                  │  (immutable records / enums)
-│   ├── LyricLine.cs                   │
-│   └── SampleLyrics.cs                │
+│   └── LyricLine.cs                   │
 │                                      ─┘
+├── Services/                         ─┐
+│   ├── Audio/                         │  LAYER 5 — Services
+│   │   ├── IAudioPlayer.cs            │  (interfaces + implementations;
+│   │   └── SilentAudioPlayer.cs       │   no view, no WPF types)
+│   ├── Library/                       │
+│   │   ├── IMusicLibraryService.cs    │
+│   │   ├── MusicLibraryService.cs     │
+│   │   ├── IAudioFileScanner.cs       │
+│   │   ├── AudioFileScanner.cs        │
+│   │   ├── ITrackMetadataReader.cs    │
+│   │   ├── TrackMetadataReader.cs     │
+│   │   └── LibraryStore.cs            │
+│   └── Lyrics/                        │
+│       ├── ILyricProvider.cs          │
+│       └── SampleLyricProvider.cs    ─┘
+│
 └── Interop/                          ─┐
-    └── WindowMaximizeHelper.cs        │  LAYER 5 — Platform interop
+    └── WindowMaximizeHelper.cs        │  LAYER 6 — Platform interop
                                        ─┘  (Win32, no UI knowledge)
 ```
 
 **Dependency direction is strictly downward**: `Interop` knows nothing about the view,
-`Models` know nothing about WPF, and `ViewModels` reference `Models` only. The view layer is
-the only place that knows all of them. There is no service/DI layer yet — deliberately,
-because there is nothing to inject until the audio engine exists.
+`Models` know nothing about WPF, `Services` reference `Models` only, and `ViewModels`
+reference `Models` plus the service *interfaces* they use — never a concrete implementation and
+never a view. The view layer is the only place that knows all of them. `App.xaml.cs` is the
+single point that names concrete services (see §7.10).
 
 ### Line counts by layer
 
 | Layer | Files | Lines |
 | --- | ---: | ---: |
-| Design system (`Themes/`) | 2 | 622 |
-| View (`MainWindow.*`, `Controls/`, `Converters/`) | 4 | 1,483 |
-| Presentation state (`ViewModels/`) | 2 | 401 |
-| Domain data (`Models/`) | 4 | 89 |
-| Platform interop (`Interop/`) | 1 | 146 |
-| Composition root (`App.*`, `AssemblyInfo.cs`) | 3 | 45 |
-| **Total source** | **16** | **2,786** |
+| Design system (`Themes/`) | 7 | 661 |
+| View (`MainWindow.*`, `Views/`, `Controls/`, `Converters/`) | 19 | 1,744 |
+| Presentation state (`ViewModels/`) | 4 | 551 |
+| Domain data (`Models/`) | 3 | 65 |
+| Services (`Services/`) | 11 | 498 |
+| Platform interop (`Interop/`) | 1 | 153 |
+| Composition root (`App.*`, `AssemblyInfo.cs`) | 3 | 83 |
+| **Total** | **48** | **3,755** |
 
 ---
 
@@ -122,82 +159,116 @@ Contains three kinds of resource:
 The surface ramp (1→4) is the whole depth system: nested containers simply go one step
 lighter, so no border or shadow is needed to communicate hierarchy.
 
-**`Themes/Controls.xaml` (533 lines)** — 20 styles, each built only on the tokens above, so
-retheming means editing `Colors.xaml` alone. Grouped by purpose:
+**Six style dictionaries (572 lines, 20 styles)** — split by control kind instead of one
+`Controls.xaml`. `App.xaml` merges them in dependency order (`Colors.xaml` must come first
+because everything references it). Each style is built only on the tokens above, so retheming
+means editing `Colors.xaml` alone:
 
-| Group | Styles |
+| File | Styles |
 | --- | --- |
-| Text | `DisplayTextStyle`, `TitleTextStyle`, `BodyTextStyle`, `CaptionTextStyle`, `SectionLabelStyle` (small uppercase section headers), `GlyphTextStyle` (Segoe MDL2 Assets icon font) |
-| Navigation | `NavItemStyle` — a `RadioButton` with a left accent bar that appears only on the active item |
-| Buttons | `IconButtonStyle` (34×34 round ghost icon), `PlayButtonStyle` (filled accent circle), `ArtworkButtonStyle` (clickable album art with a hover ring), `SecondaryButtonStyle` (neutral pill), `CaptionButtonStyle`, `CaptionCloseButtonStyle` (red hover) |
-| Surfaces | `CardStyle`, `WellStyle` (muted inner surface for thumbnails/icon wells) |
-| Input | `SearchBoxStyle` — placeholder text, magnifier glyph, accent focus border |
-| Now Playing | `ArtworkFrameStyle` (rounded frame + drop shadow), `LyricLineStyle`, `LyricListStyle`, `ChipStyle` |
+| `Typography.xaml` (48) | `DisplayTextStyle`, `TitleTextStyle`, `BodyTextStyle`, `CaptionTextStyle`, `SectionLabelStyle` (small uppercase section headers), `GlyphTextStyle` (Segoe MDL2 Assets icon font) |
+| `Surfaces.xaml` (31) | `CardStyle`, `WellStyle` (muted inner surface for thumbnails/icon wells) |
+| `Buttons.xaml` (246) | `IconButtonStyle` (34×34 round ghost icon), `PlayButtonStyle` (filled accent circle), `ArtworkButtonStyle` (clickable album art with a hover ring), `SecondaryButtonStyle` (neutral pill), `CaptionButtonStyle`, `CaptionCloseButtonStyle` (red hover) |
+| `Inputs.xaml` (81) | `SearchBoxStyle` — placeholder text, magnifier glyph, accent focus border |
+| `Navigation.xaml` (77) | `NavItemStyle` — a `RadioButton` with a left accent bar that appears only on the active item |
+| `NowPlaying.xaml` (89) | `ArtworkFrameStyle` (rounded frame + drop shadow), `LyricLineStyle`, `LyricListStyle`, `ChipStyle` |
 
 ### 4.2 Layer 2 — View
 
-**`MainWindow.xaml` (977 lines)** — one window, five regions, marked by banner comments:
+The window is split into one assembly file plus seven composed views. A view never sets its
+own `Grid.Row` / `Grid.Column` / `Grid.RowSpan` — the consumer decides where it goes, so the
+same control can be relocated without editing it.
 
-1. **Caption bar** (row 0, 40px) — brand mark on the left, window buttons on the right.
-   Buttons are marked `shell:WindowChrome.IsHitTestVisibleInChrome="True"` so they receive
-   clicks even though the whole strip is a drag area.
-2. **Sidebar** (column 0 of the body, 244px) — `BROWSE` section with `Home`, `Local Music`,
-   and a disabled `Playlists` entry, plus a `Preview build` footer.
-3. **Page host** (column 1) — a shared header (`PageTitle`, `PageSubtitle`, search box)
-   above two visibility-toggled pages:
-   - **Home**: gradient hero banner with two CTAs, a `UniformGrid` of three quick-access
-     cards, and a compact "library is empty" card.
-   - **Local Music**: toolbar (`0 tracks · 0 albums`, disabled import button) and a centred
-     empty state.
-4. **Player bar** (row 2, 88px) — artwork button (opens Now Playing), title/artist,
-   favourite button, transport controls, seek bar, volume.
-5. **Now Playing overlay** — a `Grid.RowSpan="3"` layer with its own caption strip (back
-   button + `NOW PLAYING` + window buttons), an artwork/facts/transport card on the left and
-   the lyric sheet on the right.
+**`MainWindow.xaml` (97 lines)** — only the assembly: `WindowChrome` settings, a three-row
+grid (caption 40 / body `*` / player bar 88), and the placement of the seven views. It also
+declares a `d:DataContext` design instance; the runtime `DataContext` is injected by the
+composition root (§7.10).
 
-**`MainWindow.xaml.cs` (173 lines)** — the only code-behind, and it deliberately holds **no
-UI state**. It contains exactly four concerns:
+**`Views/Shell/`**
 
-- Window chrome: `MinimizeButton_Click`, `MaximizeButton_Click`, `CloseButton_Click`,
-  `UpdateMaximizeGlyph()` (swaps `E922`/`E923` on both the main and overlay caption buttons).
-- Chrome polish: an `OnMouseLeftButtonDown` override that stops the caption from stealing
-  focus, and `WindowMaximizeHelper.Attach(this)`.
-- Overlay keyboard handling: `OnPreviewKeyDown` closes the overlay on `Esc` (preview-time so
-  a focused lyric row cannot swallow the key).
-- Lyric scrolling: subscribes to `MainWindowViewModel.PropertyChanged`, and on
-  `ActiveLyricIndex` calls `BringIntoView()` on the new row via
-  `Dispatcher.BeginInvoke(..., DispatcherPriority.Loaded)`. This is view-only work — the view
-  model never touches a `ListBox`.
+| File | Lines | Contents |
+| --- | ---: | --- |
+| `CaptionBarView.xaml(.cs)` | 57 + 28 | Brand mark, the `MaximizeButton` and the three window buttons. Visibility is inverted on `IsNowPlayingOpen`, because the overlay draws its own caption. Code-behind delegates to `CaptionChrome`. |
+| `SidebarView.xaml(.cs)` | 84 + 13 | `BROWSE` section with `Home`, `Local Music` and a disabled `Playlists` entry, plus a `Preview build` footer. |
+| `PageHeaderView.xaml(.cs)` | 28 + 13 | `PageTitle`, `PageSubtitle` and the search box. |
+| `PlayerBarView.xaml(.cs)` | 147 + 12 | Artwork button (opens Now Playing), metadata, favourite button, transport, seek bar, volume. No code-behind logic. |
 
-**`Controls/SlimSlider.cs` (299 lines)** — a `Slider` subclass that paints itself. Five
+**`Views/Pages/`**
+
+| File | Lines | Contents |
+| --- | ---: | --- |
+| `HomePageView.xaml(.cs)` | 181 + 12 | Gradient hero banner with two CTAs, a `UniformGrid` of three quick-access cards, and a compact "library is empty" card. |
+| `LibraryPageView.xaml(.cs)` | 75 + 12 | Toolbar (`0 tracks · 0 albums`, disabled import button) and a centred empty state; visibility driven by `IsLibrarySelected`. |
+
+**`Views/Overlays/NowPlayingView.xaml(.cs)`** (349 + 113) — the `Grid.RowSpan="3"` layer:
+its own caption strip (back button, `NOW PLAYING`, `OverlayMaximizeButton`), an
+artwork/facts/transport card on the left, and the lyric sheet on the right. Its code-behind
+holds the two genuinely view-only concerns: `ActiveLyricIndex` → `BringIntoView()` scrolling
+(deferred to `DispatcherPriority.Loaded` so freshly realised containers have a valid position)
+and click-to-seek on a lyric row.
+
+**`MainWindow.xaml.cs` (61 lines)** — now only window-level concerns: `OnMouseLeftButtonDown`
+(keeps the caption from stealing focus), `WindowMaximizeHelper.Attach(this)`, and
+`OnPreviewKeyDown` closing the overlay on `Esc` — kept on the window because preview input
+reaches it before a focused lyric row can swallow the key.
+
+**`Views/CaptionChrome.cs` (115 lines)** — shared caption behaviour for the two caption
+strips. `Attach(Button maximizeButton)` subscribes to the owning window's `StateChanged` and
+paints the `E922`/`E923` glyph, so the shell caption and the overlay caption cannot disagree;
+`Minimize` / `ToggleMaximize` / `Close` resolve the owning `Window` with
+`Window.GetWindow(visual)`, which is what lets a `UserControl` drive window state without a
+reference to `MainWindow`.
+
+**`Controls/SlimSlider.cs` (309 lines)** — a `Slider` subclass that paints itself. Five
 dependency properties (`TrackBrush`, `FillBrush`, `ThumbBrush`, `TrackThickness` = 4.0,
 `ThumbDiameter` = 11.0). It inherits *all* behaviour from `Slider` (binding, keyboard
 stepping, value coercion, `ValueChanged`) and only replaces rendering (`OnRender`) and mouse
 handling (click-to-seek + drag). The thumb dot appears only on hover or while dragging, so
 the resting player bar stays flat.
 
-**`Converters/BoolToVisibilityConverter.cs` (34 lines)** — one converter with an `Invert`
+**`Converters/BoolToVisibilityConverter.cs` (38 lines)** — one converter with an `Invert`
 flag, registered twice in `App.xaml` as `BoolToVisibility` and `InverseBoolToVisibility`.
 Avoids a `Style`/`DataTrigger` boilerplate for every "show this when X" case.
 
 ### 4.3 Layer 3 — Presentation state (`ViewModels/`)
 
-**`MainWindowViewModel.cs` (358 lines)** — the single view model for the shell. Uses
+Four view models. The shell composes the two children and is the only type that knows both;
+the children never reference each other or their parent (§7.11). All use
 `CommunityToolkit.Mvvm` source generators (`[ObservableProperty]`, `[RelayCommand]`), so no
 `INotifyPropertyChanged` boilerplate is written by hand.
 
-- **Input state** (7 `[ObservableProperty]` fields): `CurrentPage`, `CurrentTrack`,
-  `IsPlaying`, `PositionSeconds`, `Volume` (70), `SearchText`, `IsNowPlayingOpen`.
-- **Derived state** (computed getters, re-raised from `partial void On…Changed`): `HasTrack`,
-  `PageTitle`, `PageSubtitle`, `TrackTitle`, `TrackArtist`, `TrackAlbum`,
-  `TrackAlbumPosition`, `DurationSeconds`, `PositionText`, `DurationText`, `PlayPauseGlyph`,
-  `PlayPauseTooltip`, `HasLyrics`, `ArtworkGlyph`.
-- **Navigation**: `IsHomeSelected` / `IsLibrarySelected` (settable, see §7.3) and the
-  `ShowLibrary` command.
-- **Overlay**: `OpenNowPlaying` (gated by `CanExecute = nameof(HasTrack)`), `CloseNowPlaying`.
-- **Transport**: `TogglePlayback` (gated by `HasTrack`), `SeekToLyric`.
-- **Lyrics**: `Lyrics` collection, `ActiveLyricIndex`, `LoadLyrics()`, and
-  `UpdateActiveLyric(TimeSpan)` which picks the last line whose start time ≤ position.
+**`MainWindowViewModel.cs` (215 lines)** — navigation state plus composition; the mediator.
+
+- **Own state**: `CurrentPage`, `SearchText`, `IsNowPlayingOpen`.
+- **Derived state**: `IsHomeSelected` / `IsLibrarySelected` (settable, see §7.3), `PageTitle`,
+  `PageSubtitle`.
+- **Commands**: `ShowLibrary`, `OpenNowPlaying` (gated by `CanOpenNowPlaying`),
+  `CloseNowPlaying`, `SeekToLyric(LyricLineViewModel?)`.
+- **Composition**: exposes `PlayerBar` and `NowPlaying` as properties, so the views bind
+  *through* them (`{Binding PlayerBar.TrackTitle}`) while the window keeps one `DataContext`.
+- **Mediation**: `OnPlayerBarPropertyChanged` is the only edge between the two children —
+  `PositionSeconds` → `NowPlaying.UpdateActiveLyric(...)`, `CurrentTrack` →
+  `NowPlaying.LoadFor(...)` and a re-evaluation of `OpenNowPlayingCommand`.
+
+**`ViewModels/Shell/PlayerBarViewModel.cs` (184 lines)** — transport plus track metadata, and
+the single source of truth for the playback position.
+
+- **Input state**: `CurrentTrack` (`Track.Sample` by default), `IsPlaying`, `PositionSeconds`,
+  `Volume` (70).
+- **Derived state**: `HasTrack`, `TrackTitle`, `TrackArtist`, `TrackAlbum`,
+  `TrackAlbumPosition`, `ArtworkGlyph`, `DurationSeconds`, `DurationText`, `PositionText`,
+  `PlayPauseGlyph`, `PlayPauseTooltip`.
+- **Commands**: `TogglePlayback` (gated by `HasTrack`), which also drives the injected
+  `IAudioPlayer`; `OnPositionSecondsChanged` forwards seeks to the same interface.
+
+**`ViewModels/Shell/NowPlayingViewModel.cs` (109 lines)** — the karaoke half of the overlay.
+
+- `Lyrics` (an `ObservableCollection<LyricLineViewModel>`), `HasLyrics`, `ActiveLyricIndex`.
+- `LoadFor(Track)` rebuilds the rows from the injected `ILyricProvider`;
+  `UpdateActiveLyric(TimeSpan)` picks the last line whose start time ≤ position and flips only
+  the rows that change.
+- It holds **no** transport state: the position is pushed in by the shell mediator, so the
+  overlay and the player bar always show the same instant.
 
 **`LyricLineViewModel.cs` (43 lines)** — one row: immutable `Time`/`Text` plus a mutable
 `IsActive`. Putting the highlight flag on the row means a playback tick notifies only the two
@@ -207,16 +278,40 @@ rows that change, instead of invalidating the whole list.
 
 | File | Contents |
 | --- | --- |
-| `Track.cs` (24) | `sealed record Track(string Title, string Artist, TimeSpan Duration)`; `Track.Empty` (nothing loaded) and `Track.Sample` ("Midnight Drive" / "The Wanderers" / 3:32) preloaded so the player bar is reviewable before the audio engine exists |
+| `Track.cs` (38) | `sealed record Track(string Title, string Artist, TimeSpan Duration, string? FilePath = null)` with `IsPlayable`, plus `Track.Empty` (nothing loaded) and `Track.Sample` ("Midnight Drive" / "The Wanderers" / 3:32) so the player bar is reviewable before the audio engine exists |
 | `PlayerPage.cs` (15) | `enum PlayerPage { Home, Library }` — the overlay is intentionally *not* a member |
 | `LyricLine.cs` (12) | `sealed record LyricLine(TimeSpan Time, string Text)` |
-| `SampleLyrics.cs` (38) | `IReadOnlyList<LyricLine> ForSampleTrack` — 16 placeholder lines, one every 12s |
 
-These are pure data: no WPF types, no notification, no behaviour.
+These are pure data: no WPF types, no notification, no behaviour. The sample lyrics that used
+to live here are now `Services/Lyrics/SampleLyricProvider.cs` — they are a data *source*, not
+a domain type.
 
-### 4.5 Layer 5 — Platform interop (`Interop/`)
+### 4.5 Layer 5 — Services (`Services/`)
 
-**`WindowMaximizeHelper.cs` (146 lines)** — answers `WM_GETMINMAXINFO` (0x0024) with the work
+**`Library/` (330 lines)** — the import pipeline, split by responsibility so each piece can be
+replaced or faked on its own. `IMusicLibraryService` is the only library type a view model may
+depend on.
+
+| File | Lines | Responsibility |
+| --- | ---: | --- |
+| `IMusicLibraryService.cs` | 31 | Contract: `ScanAsync` / `LoadAsync` / `SaveAsync` |
+| `MusicLibraryService.cs` | 79 | Orchestration only: walks the scanner's output, asks the reader for tags, delegates persistence |
+| `IAudioFileScanner.cs` / `AudioFileScanner.cs` | 24 + 42 | Extension whitelist and `Directory.EnumerateFiles` |
+| `ITrackMetadataReader.cs` / `TrackMetadataReader.cs` | 19 + 67 | TagLibSharp title/artist/duration with an explicit exception whitelist, so one corrupt file cannot abort a scan |
+| `LibraryStore.cs` | 78 | `library.json` read/write with a temp-file-then-move atomic write |
+
+**`Lyrics/` (63 lines)** — `ILyricProvider.GetLyrics(Track)` and `SampleLyricProvider` (16
+placeholder lines, one every 12 s). This seam exists so an `.lrc` parser drops in without
+touching a view or a view model.
+
+**`Audio/` (95 lines)** — `IAudioPlayer` (`IsPlaying`, `Play`, `Pause`, `Stop`, `Seek`) and
+`SilentAudioPlayer`, which records the requested state without producing sound. The view
+models depend on the interface only, so a real engine swaps in without touching the views
+(§9).
+
+### 4.6 Layer 6 — Platform interop (`Interop/`)
+
+**`WindowMaximizeHelper.cs` (153 lines)** — answers `WM_GETMINMAXINFO` (0x0024) with the work
 area of the monitor the window is currently on, resolved per message via
 `MonitorFromWindow` + `GetMonitorInfo`. This is what keeps the player bar on screen when the
 borderless window is maximized (see §7.5).
@@ -226,32 +321,47 @@ borderless window is maximized (see §7.5).
 ## 5. Data flow and binding map
 
 ```
-   User gesture                 ViewModel                        View
-   ────────────                 ─────────                        ────
-   click nav item ──► IsHomeSelected = true ──► CurrentPage ──► PageTitle / PageSubtitle
-                        (setter navigates)         │              page Visibility
-                                                   └─► OnCurrentPageChanged raises derived props
+   User gesture               ViewModel chain                            View
+   ────────────               ───────────────                            ────
+   click nav item ──► MainWindowViewModel.IsHomeSelected = true ──► CurrentPage
+                          (setter navigates)  │        └─► PageTitle / PageSubtitle
+                                              └─► OnCurrentPageChanged raises derived props
 
    click artwork ──► OpenNowPlayingCommand ──► IsNowPlayingOpen ──► overlay Visibility
-                                                                     caption+body Visibility (inverted)
+                        (CanExecute ← PlayerBar.HasTrack)          caption+body Visibility (inverted)
 
-   click lyric row ──► (code-behind) SeekToLyricCommand(line) ──► PositionSeconds
-                          └─► PositionText                    ├─► seek slider Value (TwoWay)
-                              UpdateActiveLyric ──► LyricLineViewModel.IsActive ──► DataTrigger
-                                                └─► ActiveLyricIndex ──► code-behind BringIntoView
+   click play ──► PlayerBar.TogglePlaybackCommand ──► PlayerBar.IsPlaying ──► PlayPauseGlyph / Tooltip
+                                          └─► IAudioPlayer.Play/Pause
 
-   click play ──► TogglePlaybackCommand ──► IsPlaying ──► PlayPauseGlyph / PlayPauseTooltip
+   drag seek ──► PlayerBar.PositionSeconds ──┬─► IAudioPlayer.Seek
+                                             ├─► PositionText ──► time label
+                                             ├─► seek slider Value (TwoWay)
+                                             └─► MainWindowViewModel.OnPlayerBarPropertyChanged
+                                                   └─► NowPlaying.UpdateActiveLyric
+                                                         ├─► LyricLineViewModel.IsActive ──► DataTrigger
+                                                         └─► ActiveLyricIndex ──► code-behind BringIntoView
+
+   click lyric row ──► (NowPlayingView code-behind) MainWindowViewModel.SeekToLyricCommand(line)
+                          └─► PlayerBar.PositionSeconds (see above)
 ```
 
 Notable binding decisions:
 
-- `Value="{Binding PositionSeconds, Mode=TwoWay}"` on **both** seek sliders. One-way binding
-  was the original choice and it was a bug: dragging moved the painted fill but never the
-  view model, so the time label and the lyric highlight desynchronised.
+- The window keeps **one** `DataContext` (the shell view model); every child view binds
+  *through* it (`{Binding PlayerBar.TrackTitle}`, `{Binding NowPlaying.Lyrics}`). Nested view
+  models without nested `DataContext`s keep the routing visible in the XAML — a typo shows up
+  in the binding path instead of silently resolving against the wrong object.
+- `PositionSeconds` is the **single source of truth** for the playback position. The slider,
+  both time labels, the karaoke highlight and the engine seek all derive from it, and the
+  engine is never asked to advance it — so there is exactly one write path per gesture and no
+  feedback loop between the two child view models.
+- `Value="{Binding PlayerBar.PositionSeconds, Mode=TwoWay}"` on **both** seek sliders.
+  One-way binding was the original choice and it was a bug: dragging moved the painted fill but
+  never the view model, so the time label and the lyric highlight desynchronised.
 - `IsChecked="{Binding IsHomeSelected, Mode=TwoWay}"` with **no** `Command` on nav items, so
   there is exactly one code path that navigates.
-- The overlay's transport controls are bound to the *same* view-model properties as the
-  player bar, so the two never disagree — the overlay simply covers the bar.
+- The overlay's transport controls bind to the *same* `PlayerBar` properties as the player
+  bar, so the two never disagree — the overlay simply covers the bar.
 
 ---
 
@@ -262,24 +372,25 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Feature | State | Where | Notes |
 | --- | --- | --- | --- |
 | Application bootstrap, theme merge, converter registration | ✅ | `App.xaml` | |
-| Borderless window, custom caption, drag, minimize/maximize/close | ✅ | `MainWindow.xaml`, `.xaml.cs` | Glyph swaps on `StateChanged` |
+| Composition root: services built and injected | ✅ | `App.xaml.cs` | Hand-wired, no container (§7.10) |
+| Borderless window, custom caption, drag, minimize/maximize/close | ✅ | `Views/Shell/CaptionBarView`, `Views/CaptionChrome.cs` | Glyph swaps on `StateChanged`, for both captions |
 | Maximized window stays inside the work area | ✅ | `Interop/WindowMaximizeHelper.cs` | Multi-monitor and DPI safe |
-| Design tokens + 20 reusable styles | ✅ | `Themes/` | Only three literal colors remain in the view, all translucent white overlays (`#40FFFFFF`, `#26FFFFFF`, `#1AFFFFFF`) that exist purely for depth on the artwork |
-| Sidebar navigation with active indicator | ✅ | `MainWindow.xaml` | `Playlists` entry disabled on purpose |
-| Home page | ✅ layout / 🟡 content | `MainWindow.xaml` | Static copy; "0 tracks imported" is hard-coded |
-| Local Music page | ✅ layout / 🟡 content | `MainWindow.xaml` | Empty state only; no `ItemsControl` yet |
-| Player bar | ✅ | `MainWindow.xaml` | Artwork, metadata, transport, seek, volume |
-| Now Playing overlay (open/close, Esc, covers the shell) | ✅ | `MainWindow.xaml`, `.xaml.cs` | |
-| Lyric sheet with karaoke highlight | ✅ | `ViewModels/`, `Themes/Controls.xaml` | Highlight logic is real, driven by `PositionSeconds` |
-| Click a lyric line to seek | ✅ | `MainWindow.xaml.cs` + VM | |
+| Design tokens + 20 reusable styles | ✅ | `Themes/` (7 dictionaries) | Only three literal colors remain in the view, all translucent white overlays (`#40FFFFFF`, `#26FFFFFF`, `#1AFFFFFF`) that exist purely for depth on the artwork |
+| Sidebar navigation with active indicator | ✅ | `Views/Shell/SidebarView.xaml` | `Playlists` entry disabled on purpose |
+| Home page | ✅ layout / 🟡 content | `Views/Pages/HomePageView.xaml` | Static copy; "0 tracks imported" is hard-coded |
+| Local Music page | ✅ layout / 🟡 content | `Views/Pages/LibraryPageView.xaml` | Empty state only; no `ItemsControl` yet |
+| Player bar | ✅ | `Views/Shell/PlayerBarView.xaml` | Artwork, metadata, transport, seek, volume |
+| Now Playing overlay (open/close, Esc, covers the shell) | ✅ | `Views/Overlays/NowPlayingView` | |
+| Lyric sheet with karaoke highlight | ✅ | `ViewModels/Shell/NowPlayingViewModel.cs`, `Themes/NowPlaying.xaml` | Highlight logic is real, driven by `PositionSeconds` |
+| Click a lyric line to seek | ✅ | `Views/Overlays/NowPlayingView.xaml.cs` + `MainWindowViewModel` | |
 | Custom-drawn slider (seek + volume) | ✅ | `Controls/SlimSlider.cs` | Click, drag, hover thumb |
-| Play / pause | 🟡 | `MainWindowViewModel.TogglePlayback` | Flips `IsPlaying`; no audio, no timer |
+| Play / pause | 🟡 | `PlayerBarViewModel.TogglePlayback` → `IAudioPlayer` | Command and engine call are real; the shipped engine is silent |
 | Playback position advancing | ⛔ | — | `PositionSeconds` only changes by seeking |
-| Search filtering | ⛔ | `SearchText` | Box is bound but nothing consumes the text |
-| Library scanning / import folder | ⛔ | — | Buttons are disabled, not fake-working |
-| Audio decoding & output | ⛔ | — | No `NAudio`/`MediaFoundation` integration yet |
-| Tag reading, real cover art | ⛔ | `ArtworkGlyph`, `TrackAlbum` | Procedural gradient + glyph placeholder |
-| `.lrc` parsing | ⛔ | `Models/SampleLyrics.cs` | Swap-in point is isolated |
+| Search filtering | ⛔ | `MainWindowViewModel.SearchText` | Box is bound but nothing consumes the text |
+| Library scanning / import folder | 🟡 backend / ⛔ UI | `Services/Library/` is complete and untested-by-UI | `IMusicLibraryService` is built by the composition root but no page owns a collection yet; buttons stay disabled |
+| Audio decoding & output | ⛔ | `Services/Audio/` | `IAudioPlayer` exists; `SilentAudioPlayer` is the only implementation |
+| Tag reading, real cover art | ✅ backend / ⛔ UI | `Services/Library/TrackMetadataReader.cs` | TagLibSharp reads title/artist/duration; `ArtworkGlyph` / `TrackAlbum` are still placeholders |
+| `.lrc` parsing | ⛔ | `Services/Lyrics/` | `ILyricProvider` is the swap-in point |
 | Playlists | ⛔ | — | Nav entry disabled |
 | Favourites, recently played, shuffle, repeat, next/previous | ⛔ | — | Buttons disabled or non-committal |
 | Settings / persistence | ⛔ | — | Nothing is written to disk |
@@ -296,7 +407,7 @@ started, and it is fenced off behind clear seams (§9).
 ### 7.1 Design tokens before controls
 
 Colors, brushes, radii and font sizes are declared once in `Themes/Colors.xaml`; every style
-in `Themes/Controls.xaml` references them, and the views reference the styles. **Why:** the
+dictionary under `Themes/` references them, and the views reference the styles. **Why:** the
 brief was "improve the UI", and a token layer makes subsequent redesign a one-file edit
 instead of a find-and-replace across 1,000 lines of markup. It also made it possible to prove
 the theme is consistent: a script diffs used vs. defined `StaticResource` keys and currently
@@ -353,40 +464,77 @@ far smaller surface than a full template.
 
 ### 7.7 Lyrics are data, not view state
 
-The overlay renders whatever the view model puts in `Lyrics`. Each row owns an `IsActive`
-flag, and `UpdateActiveLyric` walks the list once and flips only the changed rows. **Why:**
-a playback tick can fire many times per second; re-creating or re-rendering the whole list
-would be wasteful and would break scrolling. Because the view only consumes
-`IReadOnlyList<LyricLine>`, a real `.lrc` parser can replace `SampleLyrics` with no view
-change at all.
+The overlay renders whatever `NowPlayingViewModel` puts in `Lyrics`. Each row owns an
+`IsActive` flag, and `UpdateActiveLyric` walks the list once and flips only the changed rows.
+**Why:** a playback tick can fire many times per second; re-creating or re-rendering the whole
+list would be wasteful and would break scrolling. Because the view model only consumes
+`ILyricProvider`, a real `.lrc` parser can replace `SampleLyricProvider` with no view change
+at all.
 
 ### 7.8 The shell ships with sample data
 
-`MainWindowViewModel.CurrentTrack` defaults to `Track.Sample` and the lyrics are preloaded.
-**Why:** the entire player bar and Now Playing view are only reviewable against real content.
-Shipping a sample track keeps the UI verifiable and screenshot-able while the audio engine is
-absent; `Track.Empty` remains the "nothing loaded" state that disables the transport.
+`PlayerBarViewModel.CurrentTrack` defaults to `Track.Sample`, and the shell mediator calls
+`NowPlaying.LoadFor(...)` with it once, in its constructor. **Why:** the entire player bar and
+Now Playing view are only reviewable against real content. Shipping a sample track keeps the
+UI verifiable and screenshot-able while the audio engine is absent; `Track.Empty` remains the
+"nothing loaded" state that disables the transport.
 
 ### 7.9 Unimplemented controls are visibly disabled
 
 Import, playlists, shuffle, repeat, next/previous, favourite and the "more" button are either
-`IsEnabled="False"` or `CanExecute = nameof(HasTrack)`. **Why:** an inert control that *looks*
-live is worse than an obviously disabled one — it turns a missing feature into a bug report.
+`IsEnabled="False"` or `CanExecute = nameof(HasTrack)` / `nameof(CanOpenNowPlaying)`. **Why:**
+an inert control that *looks* live is worse than an obviously disabled one — it turns a
+missing feature into a bug report.
+
+### 7.10 The composition root is hand-written
+
+`App.xaml.cs` builds `AudioFileScanner`, `TrackMetadataReader`, `LibraryStore`,
+`MusicLibraryService`, `SilentAudioPlayer` and `SampleLyricProvider`, then hands the services
+and `IAudioPlayer` to `MainWindowViewModel` and wraps that in `MainWindow`. `App.xaml` no
+longer declares `StartupUri`, so the window is created after the services exist, and
+`MainWindow.xaml` carries only a `d:DataContext` design instance. **Why not DI:** the object
+graph is six types deep and has no scopes, lifetimes or configurability to speak of; a
+container would add a package, a registration file and a runtime indirection floor to save
+about ten lines of explicit `new`. And because every construction site names a concrete type,
+swapping `SilentAudioPlayer` for a real engine is one line in one place — which is the actual
+reason for having a composition root here.
+
+Two deliberate consequences: the view models never call `new` on a service (they take
+interfaces), and the parameterless `MainWindowViewModel()` overload still exists but only for
+the XAML designer — at runtime `App` always uses the injected constructor.
+
+### 7.11 The shell mediates; the children never talk to each other
+
+`MainWindowViewModel` subscribes to `PlayerBar.PropertyChanged` and forwards two things to
+`NowPlaying`: `PositionSeconds` → `UpdateActiveLyric`, `CurrentTrack` → `LoadFor`. Neither
+child holds a reference to the other or to the shell. **Why:** `PositionSeconds` is the one
+piece of state the two halves genuinely share (the bar produces it, the overlay consumes it),
+and letting one child subscribe to the other would make the pair order-dependent — creating
+`NowPlaying` before `PlayerBar` would silently hold a different position source, and closing
+the overlay would have to unhook a subscription it does not own. A single edge, owned by the
+mediator that already owns both lifetimes, keeps the graph acyclic and disposable.
+`CommunityToolkit.Mvvm`'s `WeakReferenceMessenger` was the alternative; it was rejected
+because for exactly one message type it trades a greppable method for a hidden publish site.
 
 ---
 
 ## 8. Known limitations
 
 - **No audio.** `IsPlaying` is a flag; `PositionSeconds` never advances on its own, so the
-  karaoke highlight only moves when you seek or click a lyric line.
-- **No library.** Both pages are empty states; `0 tracks · 0 albums` is static text.
-- **No tag reading.** Album, track number and artwork are placeholders
-  (`TrackAlbum`, `TrackAlbumPosition`, `ArtworkGlyph`).
-- **No persistence.** Volume, window state and page are not remembered between runs.
+  karaoke highlight only moves when you seek or click a lyric line. `IAudioPlayer` is the
+  seam, and its current implementation is silent by design (§4.5).
+- **No library UI.** Both pages are empty states; `0 tracks · 0 albums` is static text. The
+  scanning/tagging backend exists but nothing consumes it yet, so `MainWindow` still shows
+  `Track.Sample`.
+- **Placeholder artwork and album facts.** Album, track number and artwork are still
+  `TrackAlbum`, `TrackAlbumPosition` and `ArtworkGlyph`, even though `TrackMetadataReader` can
+  read real tags.
+- **No persistence.** Volume, window state and page are not remembered between runs, and
+  nothing is written to disk (`LibraryStore` is implemented but unused).
 - **Dark theme only.** The token layer makes a light theme possible but no switch exists;
   `App.xaml` hard-codes `ThemeMode="Dark"`.
-- **Single-window assumptions.** `MainWindow.xaml.cs` reaches into `LyricList` by name for
-  scrolling; if a second window ever hosts a lyric sheet, that helper needs to move.
+- **Two of the seven views have no view model.** Home and Library render static content, so
+  they bind to the shell view model only for their title and visibility.
 - **Accessibility is partial.** `AutomationProperties.Name` is set on nav items and the
   artwork/back buttons; cards, chips and the icon-only transport buttons still rely on
   tooltips.
@@ -401,30 +549,41 @@ The seams are deliberate; each of the following is a local change.
 1. Add a member to `Models/PlayerPage.cs`.
 2. Add a settable `IsXSelected` property in `MainWindowViewModel` (mirroring
    `IsHomeSelected`) and extend the `PageTitle` / `PageSubtitle` switches.
-3. Add a `RadioButton` to the sidebar and a `Grid` with
-   `Visibility="{Binding IsXSelected, Converter={StaticResource BoolToVisibility}}"` to the
-   page host.
+3. Add a `Controls/`-style `UserControl` under `Views/Pages/`, bind its root
+   `Visibility` to `IsXSelected`, register it in `MainWindow.xaml` with `Grid.Row="1"`, and
+   add a `RadioButton` to `Views/Shell/SidebarView.xaml`.
 
 **Wire real playback**
-1. Replace the body of `TogglePlayback` with an audio-engine call and have the engine push
-   `PositionSeconds` on a timer. Everything downstream (label, slider, lyric highlight,
-   `ActiveLyricIndex` → scroll) already works off that one property.
-2. Drive `IsPlaying` from the engine's state rather than from the click, so the glyph cannot
+`IAudioPlayer` already exists and `PlayerBarViewModel` already calls it from both
+`TogglePlayback` and `OnPositionSecondsChanged`; the shipped implementation is
+`SilentAudioPlayer`. So the work is:
+1. Write an `NAudio`-backed `IAudioPlayer` (or a `MediaPlayer` wrapper) and construct it in
+   `App.xaml.cs` instead of `SilentAudioPlayer`. Nothing else in the graph changes.
+2. Have that engine report its position — e.g. a `PositionChanged` event that
+   `PlayerBarViewModel` writes into `PositionSeconds`. Everything downstream (label, slider,
+   lyric highlight, `ActiveLyricIndex` → scroll) already works off that one property.
+3. Drive `IsPlaying` from the engine's state rather than from the click, so the glyph cannot
    lie.
 
 **Load real lyrics**
-Replace the body of `LoadLyrics()` with an `.lrc` parser that produces `LyricLine` values.
-Nothing else changes — the view, the highlight logic and click-to-seek are all generic.
+Implement `ILyricProvider` with an `.lrc` parser that produces `LyricLine` values and construct
+it in `App.xaml.cs` instead of `SampleLyricProvider`. Nothing else changes — the view, the
+highlight logic and click-to-seek are all generic.
 
 **Load real artwork**
 Replace the glyph `TextBlock` inside the two artwork `Border`s with an `Image` bound to a new
-`ArtworkSource` property. `ArtworkFrameStyle` and the overlay's `Viewbox` already handle
+`ArtworkSource` property on `PlayerBarViewModel` (sourced from `TrackMetadataReader`'s
+`TagLib` picture frame). `ArtworkFrameStyle` and the overlay's `Viewbox` already handle
 sizing.
 
 **Import a library**
-Add the scanner behind the two disabled "Import folder" buttons, populate a new
-`ObservableCollection<Track>`, and replace the Local Music empty state with an
-`ItemsControl` bound to it (toggle it with the existing `HasTracks`-style boolean pattern).
+`IMusicLibraryService` is already built by the composition root; hand it to a new
+`ViewModels/Pages/LibraryPageViewModel.cs`, give that view model
+`ObservableCollection<Track> Tracks` plus `HasTracks`, bind an `ItemsControl` in
+`Views/Pages/LibraryPageView.xaml` to it, and enable the two "Import folder" buttons behind
+`ScanAsync`. Wire it into `MainWindowViewModel` with the same mediator pattern as
+`PlayerBar` / `NowPlaying`: selecting a row is a command on the shell that assigns
+`PlayerBar.CurrentTrack`.
 
 ---
 
@@ -438,7 +597,8 @@ These were checked and are currently clean; they are worth keeping clean:
 | English only | `grep -rlP '[\x{4e00}-\x{9fff}]' --include=*.xaml --include=*.cs --include=*.md .` | no matches |
 | No missing style keys | diff used vs. defined `StaticResource` keys | 0 missing |
 | No dead style keys | same diff, reversed | 0 unused |
-| Comments on non-obvious code | comment-line ratio per file | 25% overall; every public type and command documented |
+| Binding paths resolve | every `{Binding X}` in `Views/` checked against the view model it inherits | checked manually, not by the compiler — bindings fail at runtime in WPF |
+| Comments on non-obvious code | comment-line ratio per file | 34% overall; every public type and command documented |
 | Runtime smoke test | launch, navigate every page, open/close the overlay, maximize, seek | passes at 1180×760 and 1920×1032 |
 
 ---

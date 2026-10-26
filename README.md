@@ -29,37 +29,61 @@ dotnet run
 
 ```
 SongPlayer/
-├─ App.xaml                 Application entry point; merges themes and registers converters
-├─ MainWindow.xaml          Window chrome, sidebar, page host, player bar and the
-│                           full-window Now Playing overlay
-├─ Themes/
+├─ App.xaml                 Theme merge + converter registration
+├─ App.xaml.cs              Composition root: builds the services and the shell view model
+├─ MainWindow.xaml          Window chrome + the placement of the seven composed views
+├─ Views/
+│  ├─ CaptionChrome.cs      Shared caption behaviour for both caption strips
+│  ├─ Shell/                CaptionBarView, SidebarView, PageHeaderView, PlayerBarView
+│  ├─ Pages/                HomePageView, LibraryPageView
+│  └─ Overlays/             NowPlayingView (also owns the lyric scrolling)
+├─ Themes/                  Design system, one dictionary per concern
 │  ├─ Colors.xaml           Design tokens: colors, brushes, radii, font sizes
-│  └─ Controls.xaml         Reusable control styles built on those tokens
-├─ Models/
-│  ├─ PlayerPage.cs         The pages the shell can display
-│  ├─ Track.cs              Immutable track description
-│  ├─ LyricLine.cs          One timestamped lyric line
-│  └─ SampleLyrics.cs       Placeholder lyrics until .lrc parsing lands
+│  ├─ Typography.xaml       Text styles
+│  ├─ Surfaces.xaml         Card and well surfaces
+│  ├─ Buttons.xaml          Icon, play, artwork, secondary and caption buttons
+│  ├─ Inputs.xaml           Search box
+│  ├─ Navigation.xaml       Sidebar nav item
+│  └─ NowPlaying.xaml       Artwork frame, lyric rows, chips
+├─ ViewModels/
+│  ├─ MainWindowViewModel.cs        Navigation state + mediator between the children
+│  ├─ Shell/PlayerBarViewModel.cs   Track metadata, transport, position (single source)
+│  ├─ Shell/NowPlayingViewModel.cs  Lyrics and the active-line index
+│  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
+├─ Models/                  Track, PlayerPage, LyricLine — plain data, no WPF
+├─ Services/
+│  ├─ Audio/                IAudioPlayer + SilentAudioPlayer (placeholder engine)
+│  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
+│  └─ Lyrics/               ILyricProvider + sample provider
 ├─ Controls/
 │  └─ SlimSlider.cs         Self-drawing seek / volume bar
 ├─ Interop/
 │  └─ WindowMaximizeHelper.cs  Keeps a maximized borderless window inside the work area
-├─ ViewModels/
-│  ├─ MainWindowViewModel.cs  Navigation, playback and lyric state for the shell
-│  └─ LyricLineViewModel.cs   A lyric row with its own highlight flag
 └─ Converters/
    └─ BoolToVisibilityConverter.cs  Boolean to Visibility (and inverted) conversion
 ```
 
 ## Architecture notes
 
-- **MVVM, no code-behind logic.** `MainWindow.xaml.cs` only handles window chrome
-  behaviour (minimize, maximize, restore glyph) and keeping the active lyric line
-  scrolled into view. All state lives in `MainWindowViewModel` and is exposed with
-  `CommunityToolkit.Mvvm` source generators.
+- **MVVM, no code-behind logic.** `MainWindow.xaml.cs` only keeps the caption from
+  stealing focus, hooks `WindowMaximizeHelper`, and closes the overlay on `Esc`; the caption
+  buttons and the lyric scrolling live next to the views that own them
+  (`Views/CaptionChrome.cs`, `Views/Overlays/NowPlayingView.xaml.cs`). All state is in the view
+  models and is exposed with `CommunityToolkit.Mvvm` source generators.
+- **One DataContext, two child view models.** The window is bound to `MainWindowViewModel`,
+  which composes `PlayerBar` and `NowPlaying`; views bind through them
+  (`{Binding PlayerBar.TrackTitle}`). Neither child references the other — the shell forwards
+  the only two shared signals (position, current track) in one method, so the graph stays
+  acyclic and the position has exactly one source.
+- **Services are injected, not constructed by UI code.** `App.xaml.cs` is the only place that
+  names concrete types: it builds the scanner/tag-reader/store facade, an `IAudioPlayer` and an
+  `ILyricProvider`, then hands them to the shell. No DI container — six objects with one
+  lifetime do not justify one. Swapping the silent player for a real engine is a single line
+  there.
 - **Design tokens first.** Colors, brushes, corner radii and font sizes are declared
   once in `Themes/Colors.xaml`. Views reference tokens rather than literal values, so
-  retheming means editing one file.
+  retheming means editing one file. The style dictionaries are split by concern rather than
+  piled into one `Controls.xaml`.
 - **Pages are views inside one window.** Home and Local Music are toggled by visibility
   bound to the view model, which keeps navigation instant and avoids a
   `Frame`/`NavigationService` for what is currently a two-page shell. The sidebar items
@@ -74,11 +98,11 @@ SongPlayer/
   the bottom of the window under the taskbar. `Interop/WindowMaximizeHelper` answers
   `WM_GETMINMAXINFO` with the work area of whichever monitor the window is on, so the
   player bar stays reachable on every screen.
-- **Lyrics are data, not view state.** The overlay renders whatever the view model puts
-  in its `Lyrics` collection; each row owns an `IsActive` flag, so advancing the highlight
-  touches only the two rows that change. Clicking a line seeks to it, and the code-behind
-  scrolls the active row into view. A real `.lrc` parser can replace
-  `Models/SampleLyrics.cs` without any view changes.
+- **Lyrics are data, not view state.** The overlay renders whatever `NowPlayingViewModel`
+  puts in its `Lyrics` collection; each row owns an `IsActive` flag, so advancing the highlight
+  touches only the two rows that change. Clicking a line seeks to it, and the view's code-behind
+  scrolls the active row into view. A real `.lrc` parser can replace `SampleLyricProvider`
+  without any view changes.
 - **The sliders are custom-drawn.** The stock WPF `Slider` chrome is heavy and its
   `Track`/repeat-button plumbing is awkward to restyle, so `Controls/SlimSlider.cs`
   paints its own track, filled portion and hover thumb while inheriting all behaviour
@@ -87,6 +111,8 @@ SongPlayer/
 ## Status
 
 This is an early preview. The shell, theming, player bar and the immersive Now Playing
-overlay are in place; library scanning, playback, playlist editing and real
-artwork/lyric loading are the next milestones. Controls that are not yet implemented are visibly disabled rather
-than silently inert.
+overlay are in place, and the library backend (file scanning, tag reading, JSON persistence)
+exists behind interfaces — it is not yet surfaced in the UI, and playback is still the silent
+`IAudioPlayer` placeholder. Real audio output, a populated Local Music page and real
+artwork/`.lrc` loading are the next milestones. Controls that are not yet implemented are
+visibly disabled rather than silently inert.
