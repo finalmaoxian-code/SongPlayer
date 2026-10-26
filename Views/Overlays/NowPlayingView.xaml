@@ -1,0 +1,349 @@
+<UserControl
+    x:Class="SongPlayer.Views.Overlays.NowPlayingView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="clr-namespace:SongPlayer.Controls"
+    xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+    mc:Ignorable="d">
+    <Grid
+        Background="{StaticResource WindowBackgroundBrush}"
+        Visibility="{Binding IsNowPlayingOpen, Converter={StaticResource BoolToVisibility}}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Overlay caption: back on the left, window controls on the right -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Button
+                Margin="12,0,0,0"
+                AutomationProperties.Name="Close Now Playing"
+                Command="{Binding CloseNowPlayingCommand}"
+                Content="&#xE70D;"
+                Style="{StaticResource IconButtonStyle}"
+                shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                ToolTip="Back to the previous page (Esc)" />
+
+            <TextBlock
+                Grid.Column="1"
+                Margin="12,0,0,0"
+                Text="NOW PLAYING"
+                Style="{StaticResource SectionLabelStyle}"
+                VerticalAlignment="Center" />
+
+            <!-- Same handlers as the main caption so the window stays controllable -->
+            <StackPanel
+                Grid.Column="2"
+                Orientation="Horizontal"
+                shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button
+                    Content="&#xE921;"
+                    Click="MinimizeButton_Click"
+                    Style="{StaticResource CaptionButtonStyle}"
+                    ToolTip="Minimize" />
+                <Button
+                    x:Name="OverlayMaximizeButton"
+                    Content="&#xE922;"
+                    Click="MaximizeButton_Click"
+                    Style="{StaticResource CaptionButtonStyle}"
+                    ToolTip="Maximize" />
+                <Button
+                    Content="&#xE8BB;"
+                    Click="CloseButton_Click"
+                    Style="{StaticResource CaptionButtonStyle}"
+                    ToolTip="Close" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Artwork + transport on the left, lyrics on the right -->
+        <Grid Grid.Row="1" Margin="12,0,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="360" MaxWidth="480" />
+                <ColumnDefinition Width="2*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ===================================================== -->
+            <!-- Artwork, track facts and transport                    -->
+            <!-- ===================================================== -->
+            <Border
+                Grid.Column="0"
+                Padding="24,24,24,20"
+                Style="{StaticResource CardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <!-- Artwork takes the slack so it stays vertically centred -->
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!--
+                        Cover art. A Viewbox keeps the placeholder square at every window
+                        size; once real cover images are loaded only the child of the
+                        Viewbox has to change.
+                    -->
+                    <Viewbox
+                        Grid.Row="0"
+                        Margin="0,0,0,20"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Stretch="Uniform"
+                        StretchDirection="Both">
+                        <Border
+                            Width="340"
+                            Height="340"
+                            Background="{StaticResource HeroGradientBrush}"
+                            Style="{StaticResource ArtworkFrameStyle}">
+                            <Grid>
+                                <!-- Concentric rings lend the flat gradient some depth -->
+                                <Ellipse
+                                    Width="248"
+                                    Height="248"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Stroke="#26FFFFFF"
+                                    StrokeThickness="1" />
+                                <Ellipse
+                                    Width="164"
+                                    Height="164"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Stroke="#1AFFFFFF"
+                                    StrokeThickness="1" />
+                                <TextBlock
+                                    Text="{Binding ArtworkGlyph}"
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="68"
+                                    Foreground="{StaticResource AccentBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </Viewbox>
+
+                    <!-- Track facts -->
+                    <StackPanel Grid.Row="1">
+                        <TextBlock
+                            Text="{Binding TrackTitle}"
+                            FontSize="24"
+                            FontWeight="SemiBold"
+                            TextTrimming="CharacterEllipsis" />
+
+                        <TextBlock
+                            Margin="0,6,0,0"
+                            Text="{Binding TrackArtist}"
+                            FontSize="14"
+                            Foreground="{StaticResource AccentBrush}"
+                            TextTrimming="CharacterEllipsis" />
+
+                        <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                            <Border Style="{StaticResource ChipStyle}">
+                                <TextBlock
+                                    Text="{Binding TrackAlbumPosition}"
+                                    Style="{StaticResource CaptionTextStyle}"
+                                    Foreground="{StaticResource TextSecondaryBrush}" />
+                            </Border>
+                            <Border Margin="8,0,0,0" Style="{StaticResource ChipStyle}">
+                                <TextBlock
+                                    Text="{Binding TrackAlbum}"
+                                    Style="{StaticResource CaptionTextStyle}"
+                                    Foreground="{StaticResource TextSecondaryBrush}" />
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Seek bar: same bindings as the player bar, so both stay in sync -->
+                    <Grid Grid.Row="2" Margin="0,20,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="42" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="42" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            Text="{Binding PositionText}"
+                            Style="{StaticResource CaptionTextStyle}"
+                            VerticalAlignment="Center" />
+
+                        <controls:SlimSlider
+                            Grid.Column="1"
+                            Margin="4,0"
+                            Maximum="{Binding DurationSeconds}"
+                            Value="{Binding PositionSeconds, Mode=TwoWay}"
+                            VerticalAlignment="Center" />
+
+                        <TextBlock
+                            Grid.Column="2"
+                            Text="{Binding DurationText}"
+                            HorizontalAlignment="Right"
+                            Style="{StaticResource CaptionTextStyle}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+
+                    <!-- Transport controls -->
+                    <StackPanel
+                        Grid.Row="3"
+                        Margin="0,14,0,0"
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal">
+                        <Button
+                            Content="&#xE8B1;"
+                            IsEnabled="False"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Shuffle (coming soon)" />
+                        <Button
+                            Margin="8,0,0,0"
+                            Content="&#xE892;"
+                            IsEnabled="{Binding HasTrack}"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Previous" />
+                        <Button
+                            Margin="10,0"
+                            Command="{Binding TogglePlaybackCommand}"
+                            Content="{Binding PlayPauseGlyph}"
+                            Style="{StaticResource PlayButtonStyle}"
+                            ToolTipService.ShowOnDisabled="True"
+                            ToolTip="{Binding PlayPauseTooltip}" />
+                        <Button
+                            Margin="0,0,8,0"
+                            Content="&#xE893;"
+                            IsEnabled="{Binding HasTrack}"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Next" />
+                        <Button
+                            Content="&#xE8EE;"
+                            IsEnabled="False"
+                            Style="{StaticResource IconButtonStyle}"
+                            ToolTip="Repeat (coming soon)" />
+                    </StackPanel>
+
+                    <!-- Volume: the player bar is covered by the overlay, so it lives here -->
+                    <StackPanel
+                        Grid.Row="4"
+                        Margin="0,14,0,0"
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal">
+                        <TextBlock
+                            Text="&#xE767;"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="13"
+                            Foreground="{StaticResource TextTertiaryBrush}"
+                            VerticalAlignment="Center" />
+                        <controls:SlimSlider
+                            Width="120"
+                            Margin="10,0,0,0"
+                            Maximum="100"
+                            Value="{Binding Volume, Mode=TwoWay}"
+                            VerticalAlignment="Center"
+                            ToolTip="Volume" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ===================================================== -->
+            <!-- Lyrics                                                -->
+            <!-- ===================================================== -->
+            <Border
+                Grid.Column="1"
+                Margin="12,0,0,0"
+                Padding="16,16,10,16"
+                Style="{StaticResource CardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="6,0,6,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="LYRICS" Style="{StaticResource SectionLabelStyle}" />
+
+                        <TextBlock
+                            Grid.Column="1"
+                            HorizontalAlignment="Right"
+                            Text="Click a line to jump"
+                            Style="{StaticResource CaptionTextStyle}" />
+                    </Grid>
+
+                    <!--
+                        The list is bound to the lyric rows; the active line carries
+                        IsActive, which the item style turns into the accent highlight.
+                        Clicking a row seeks through SeekToLyricCommand.
+                    -->
+                    <ListBox
+                        x:Name="LyricList"
+                        Grid.Row="1"
+                        ItemsSource="{Binding Lyrics}"
+                        Style="{StaticResource LyricListStyle}"
+                        Visibility="{Binding HasLyrics, Converter={StaticResource BoolToVisibility}}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <!-- The item template only renders text; padding and
+                                     highlighting come from the container style. -->
+                                <TextBlock
+                                    Text="{Binding Text}"
+                                    TextWrapping="Wrap"
+                                    VerticalAlignment="Center" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ItemContainerStyle>
+                            <!-- Derived from the shared style so the karaoke highlight
+                                 stays in one place, plus the click-to-seek hook. -->
+                            <Style BasedOn="{StaticResource LyricLineStyle}" TargetType="ListBoxItem">
+                                <EventSetter Event="MouseLeftButtonUp" Handler="LyricLine_MouseLeftButtonUp" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+
+                    <!-- Shown for tracks that carry no lyric data yet -->
+                    <StackPanel
+                        Grid.Row="1"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Visibility="{Binding HasLyrics, Converter={StaticResource InverseBoolToVisibility}}">
+                        <Border
+                            Width="56"
+                            Height="56"
+                            HorizontalAlignment="Center"
+                            Style="{StaticResource WellStyle}">
+                            <TextBlock
+                                Text="&#xE8BD;"
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="22"
+                                Foreground="{StaticResource TextTertiaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock
+                            Margin="0,14,0,0"
+                            HorizontalAlignment="Center"
+                            Text="No lyrics for this track"
+                            FontSize="15"
+                            FontWeight="SemiBold" />
+                        <TextBlock
+                            Margin="0,6,0,0"
+                            MaxWidth="320"
+                            HorizontalAlignment="Center"
+                            TextAlignment="Center"
+                            Text="Add an .lrc file next to the audio file and SongPlayer will follow along."
+                            Style="{StaticResource BodyTextStyle}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

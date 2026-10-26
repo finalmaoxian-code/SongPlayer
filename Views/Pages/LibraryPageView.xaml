@@ -1,0 +1,75 @@
+<UserControl
+    x:Class="SongPlayer.Views.Pages.LibraryPageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+    <Grid Visibility="{Binding IsLibrarySelected, Converter={StaticResource BoolToVisibility}}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <Grid Margin="0,0,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+                Text="0 tracks · 0 albums"
+                Foreground="{StaticResource TextSecondaryBrush}"
+                FontSize="{StaticResource FontSizeCaption}"
+                VerticalAlignment="Center" />
+
+            <Button
+                Grid.Column="1"
+                Content="Import folder"
+                IsEnabled="False"
+                Style="{StaticResource SecondaryButtonStyle}"
+                ToolTip="Folder import is coming in the next milestone" />
+        </Grid>
+
+        <!-- Empty library state -->
+        <Border Grid.Row="1" Margin="0,0,0,4" Style="{StaticResource CardStyle}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border
+                    Width="72"
+                    Height="72"
+                    HorizontalAlignment="Center"
+                    Style="{StaticResource WellStyle}">
+                    <TextBlock
+                        Text="&#xE8F1;"
+                        FontFamily="Segoe MDL2 Assets"
+                        FontSize="28"
+                        Foreground="{StaticResource AccentBrush}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+                </Border>
+
+                <TextBlock
+                    Margin="0,18,0,0"
+                    HorizontalAlignment="Center"
+                    FontSize="18"
+                    FontWeight="SemiBold"
+                    Text="No local music yet" />
+
+                <TextBlock
+                    Margin="0,8,0,20"
+                    MaxWidth="400"
+                    HorizontalAlignment="Center"
+                    TextAlignment="Center"
+                    Text="Point SongPlayer at a folder and it will index your audio files. The import pipeline is the next milestone."
+                    Style="{StaticResource BodyTextStyle}" />
+
+                <Button
+                    Content="Import folder"
+                    IsEnabled="False"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    ToolTip="Folder import is coming in the next milestone" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

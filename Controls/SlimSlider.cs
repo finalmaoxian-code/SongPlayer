@@ -21,31 +21,36 @@ public sealed class SlimSlider : Slider
         nameof(TrackBrush),
         typeof(Brush),
         typeof(SlimSlider),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender)
+    );
 
     public static readonly DependencyProperty FillBrushProperty = DependencyProperty.Register(
         nameof(FillBrush),
         typeof(Brush),
         typeof(SlimSlider),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender)
+    );
 
     public static readonly DependencyProperty ThumbBrushProperty = DependencyProperty.Register(
         nameof(ThumbBrush),
         typeof(Brush),
         typeof(SlimSlider),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender)
+    );
 
     public static readonly DependencyProperty TrackThicknessProperty = DependencyProperty.Register(
         nameof(TrackThickness),
         typeof(double),
         typeof(SlimSlider),
-        new FrameworkPropertyMetadata(4.0, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(4.0, FrameworkPropertyMetadataOptions.AffectsRender)
+    );
 
     public static readonly DependencyProperty ThumbDiameterProperty = DependencyProperty.Register(
         nameof(ThumbDiameter),
         typeof(double),
         typeof(SlimSlider),
-        new FrameworkPropertyMetadata(11.0, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(11.0, FrameworkPropertyMetadataOptions.AffectsRender)
+    );
 
     /// <summary>Colour of the unfilled part of the bar.</summary>
     public Brush? TrackBrush
@@ -89,7 +94,8 @@ public sealed class SlimSlider : Slider
         // top of everything OnRender draws.
         DefaultStyleKeyProperty.OverrideMetadata(
             typeof(SlimSlider),
-            new FrameworkPropertyMetadata(typeof(SlimSlider)));
+            new FrameworkPropertyMetadata(typeof(SlimSlider))
+        );
     }
 
     public SlimSlider()
@@ -145,7 +151,8 @@ public sealed class SlimSlider : Slider
             null,
             new Rect(0, centerY - radius, width, thickness),
             radius,
-            radius);
+            radius
+        );
 
         // Filled portion.
         double fillWidth = width * FillRatio;
@@ -156,7 +163,8 @@ public sealed class SlimSlider : Slider
                 null,
                 new Rect(0, centerY - radius, fillWidth, thickness),
                 radius,
-                radius);
+                radius
+            );
         }
 
         // Thumb dot: hidden at rest, revealed on hover/drag to keep the bar calm.
@@ -168,14 +176,16 @@ public sealed class SlimSlider : Slider
         double diameter = Math.Max(2, ThumbDiameter);
         var center = new Point(
             Math.Clamp(fillWidth, diameter / 2, Math.Max(diameter / 2, width - diameter / 2)),
-            centerY);
+            centerY
+        );
 
         dc.DrawEllipse(
             ResolveBrush(ThumbBrush, "TextPrimaryBrush", Color.FromRgb(0xF3, 0xF4, 0xF8)),
             null,
             center,
             diameter / 2,
-            diameter / 2);
+            diameter / 2
+        );
     }
 
     /// <summary>

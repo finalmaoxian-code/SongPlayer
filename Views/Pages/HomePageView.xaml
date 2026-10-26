@@ -1,0 +1,181 @@
+<UserControl
+    x:Class="SongPlayer.Views.Pages.HomePageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Padding="0,0,6,0"
+        Visibility="{Binding IsHomeSelected, Converter={StaticResource BoolToVisibility}}">
+        <StackPanel>
+
+            <!-- Hero banner -->
+            <Border
+                Padding="28,24"
+                Background="{StaticResource HeroGradientBrush}"
+                CornerRadius="{StaticResource CardCornerRadius}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock
+                            Text="Your music, beautifully organized"
+                            FontSize="21"
+                            FontWeight="SemiBold"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            Margin="0,9,0,0"
+                            MaxWidth="440"
+                            HorizontalAlignment="Left"
+                            Text="SongPlayer keeps your local collection in one calm, focused place. Import a folder and everything else falls into line."
+                            Style="{StaticResource BodyTextStyle}" />
+
+                        <StackPanel Margin="0,18,0,0" Orientation="Horizontal">
+                            <Button
+                                Content="Browse local music"
+                                Command="{Binding ShowLibraryCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}" />
+                            <Button
+                                Margin="10,0,0,0"
+                                Content="Import folder"
+                                IsEnabled="False"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                ToolTip="Folder import is coming in the next milestone" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Decorative album-art placeholder -->
+                    <Border
+                        Grid.Column="1"
+                        Width="132"
+                        Height="132"
+                        Margin="28,0,0,0"
+                        VerticalAlignment="Center"
+                        Background="#40FFFFFF"
+                        CornerRadius="{StaticResource CardCornerRadius}">
+                        <TextBlock
+                            Text="&#xE8D6;"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="46"
+                            Foreground="{StaticResource AccentBrush}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Quick access cards -->
+            <TextBlock
+                Margin="2,26,0,10"
+                Text="QUICK ACCESS"
+                Style="{StaticResource SectionLabelStyle}" />
+
+            <UniformGrid Columns="3">
+                <!-- Local music -->
+                <Border Margin="0,0,10,0" Padding="18" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <Border
+                            Width="40"
+                            Height="40"
+                            HorizontalAlignment="Left"
+                            Style="{StaticResource WellStyle}">
+                            <TextBlock
+                                Text="&#xE8F1;"
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="17"
+                                Foreground="{StaticResource AccentBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Margin="0,14,0,0" Text="Local Music" Style="{StaticResource TitleTextStyle}" />
+                        <TextBlock
+                            Margin="0,6,0,0"
+                            Text="0 tracks imported"
+                            Style="{StaticResource CaptionTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Recently played -->
+                <Border Margin="5,0" Padding="18" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <Border
+                            Width="40"
+                            Height="40"
+                            HorizontalAlignment="Left"
+                            Style="{StaticResource WellStyle}">
+                            <TextBlock
+                                Text="&#xE81C;"
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="17"
+                                Foreground="{StaticResource TextTertiaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Margin="0,14,0,0" Text="Recently Played" Style="{StaticResource TitleTextStyle}" />
+                        <TextBlock
+                            Margin="0,6,0,0"
+                            Text="Nothing yet"
+                            Style="{StaticResource CaptionTextStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Favorites -->
+                <Border Margin="10,0,0,0" Padding="18" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <Border
+                            Width="40"
+                            Height="40"
+                            HorizontalAlignment="Left"
+                            Style="{StaticResource WellStyle}">
+                            <TextBlock
+                                Text="&#xEB51;"
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="17"
+                                Foreground="{StaticResource TextTertiaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Margin="0,14,0,0" Text="Favorites" Style="{StaticResource TitleTextStyle}" />
+                        <TextBlock
+                            Margin="0,6,0,0"
+                            Text="Nothing yet"
+                            Style="{StaticResource CaptionTextStyle}" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <!-- Empty state -->
+            <Border Margin="0,16,0,4" Padding="24,20" Style="{StaticResource CardStyle}">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border
+                        Width="44"
+                        Height="44"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource WellStyle}">
+                        <TextBlock
+                            Text="&#xE8D6;"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="18"
+                            Foreground="{StaticResource AccentBrush}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+                    </Border>
+
+                    <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="Your library is empty" Style="{StaticResource TitleTextStyle}" />
+                        <TextBlock
+                            Margin="0,5,0,0"
+                            Text="Songs you import will appear here. Library scanning lands in the next milestone."
+                            Style="{StaticResource BodyTextStyle}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

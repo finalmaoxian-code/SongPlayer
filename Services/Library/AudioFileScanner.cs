@@ -25,8 +25,7 @@ public sealed class AudioFileScanner : IAudioFileScanner
     };
 
     /// <inheritdoc />
-    public bool IsSupported(string path)
-        => Extensions.Contains(Path.GetExtension(path));
+    public bool IsSupported(string path) => Extensions.Contains(Path.GetExtension(path));
 
     /// <inheritdoc />
     public string[] FindMusicFiles(string folder)
