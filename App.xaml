@@ -8,9 +8,20 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <!-- Design tokens must come first: the control styles reference them. -->
+                <!-- Design tokens must come first: every other dictionary references them. -->
                 <ResourceDictionary Source="Themes/Colors.xaml" />
-                <ResourceDictionary Source="Themes/Controls.xaml" />
+
+                <!--
+                    Style dictionaries. Order matters only where one style is BasedOn another
+                    (Buttons.xaml keeps its own base-to-derived order internally), but the group
+                    is listed roughly from primitives to compositions for readability.
+                -->
+                <ResourceDictionary Source="Themes/Typography.xaml" />
+                <ResourceDictionary Source="Themes/Surfaces.xaml" />
+                <ResourceDictionary Source="Themes/Buttons.xaml" />
+                <ResourceDictionary Source="Themes/Inputs.xaml" />
+                <ResourceDictionary Source="Themes/Navigation.xaml" />
+                <ResourceDictionary Source="Themes/NowPlaying.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <!-- Shared value converters -->
