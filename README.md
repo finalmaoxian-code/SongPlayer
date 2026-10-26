@@ -56,14 +56,14 @@ SongPlayer/
 │  ├─ MainWindowViewModel.cs        Navigation state + mediator between the children
 │  ├─ Shell/PlayerBarViewModel.cs   Track metadata, transport, position (single source)
 │  ├─ Shell/NowPlayingViewModel.cs  Active card (visualiser / lines), lyrics, active-line index
-│  ├─ Shell/BilibiliViewModel.cs    BV id input, bridge resolve, retry on an expired link
+│  ├─ Shell/BilibiliViewModel.cs    Online search candidates, bridge resolve, retry on an expired link
 │  ├─ Pages/LibraryPageViewModel.cs Import, persistence, track list, selection
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
 ├─ Models/                  Track, PlayerPage, LyricLine, OverlayView, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
 │  ├─ Artwork/              CoverImageLoader: downloads and decodes artwork off the UI thread
 │  ├─ Audio/                IAudioPlayer + LibVlcAudioPlayer, WasapiAudioTap + SpectrumAnalyzer
-│  ├─ Bilibili/             Bridge client, stream URL + metadata resolution, duration probe
+│  ├─ Bilibili/             Bridge client, search candidates, stream URL + metadata resolution, duration probe
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
 │  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
 │  └─ Lyrics/               ILyricProvider, TrackLyricProvider, CaptionStore, sample provider
@@ -160,10 +160,15 @@ turns engine failures (missing file, unsupported format, rejected play, expired 
 visible message in the player bar instead of an exception or a silent no-op. Seeking is
 coalesced to ten requests a second so dragging the bar does not stutter the audio.
 
-Online playback works: paste a Bilibili BV id into the Local Music toolbar and SongPlayer asks
-the local Node bridge (`127.0.0.1:39271`, from the sibling `SongPlayer.SourceLab` project) for
-the DASH audio URL, reads the real duration out of the stream's `sidx` box, and plays it through
-the same engine and the same transport. The video's title, uploader and thumbnail come back with
+Online playback works two ways from the Local Music toolbar. Type a keyword and **Search** asks
+Bilibili for uploads of that song or artist and shows what came back; or paste a Bilibili BV id
+and **Play BV…** goes straight to it. The search path is a picker rather than an answer machine
+on purpose: a query for a song returns the official video next to 4K remasters, hour-long
+compilations and videos that merely mention the words, so the app lists the candidates with their
+uploader and length and lets the listener choose. Selecting one resolves it exactly as a pasted
+id does — SongPlayer asks the local Node bridge (`127.0.0.1:39271`, from the sibling
+`SongPlayer.SourceLab` project) for the DASH audio URL, reads the real duration out of the
+stream's `sidx` box, and plays it through the same engine and the same transport. The video's title, uploader and thumbnail come back with
 it: the player bar and the Now Playing overlay show the real cover, and the metadata is labelled
 as a video's rather than a song's. A resolved video is remembered by its BV id, so the row is
 still in the library after a restart — with its cached title, uploader, length and thumbnail, but
@@ -173,6 +178,8 @@ bridge could read is archived under `%LOCALAPPDATA%\SongPlayer\captions` and rep
 same karaoke list — Bilibili only publishes most subtitle tracks to a signed-in session, so that
 list is usually empty and the overlay says why. The bridge has to be running; the page says so
 when it is not, and local files keep working regardless. The signed URL is never persisted.
+Bilibili rate-limits burst searches; when it does, the page reports the refusal the bridge sent
+back instead of claiming the bridge is down.
 
 The Now Playing overlay's right-hand card opens on a **live spectrum** of what SongPlayer is
 playing: NAudio's WASAPI process loopback records this process's own output, a 2048-point FFT
@@ -190,7 +197,8 @@ audio behind it.
 
 There is no queue yet: a track ends where it ends, and the left transport button restarts the
 current track rather than stepping back through history. `.lrc` parsing, embedded cover art for
-local files, search over the library, playlists, per-track removal and a queue with
-next/shuffle/repeat are the next milestones. A choice of visualiser style (bars, radial,
+local files, search over the library itself (the toolbar box queries Bilibili, not your imported
+rows), playlists, per-track removal and a queue with next/shuffle/repeat are the next
+milestones. A choice of visualiser style (bars, radial,
 waveform) is deliberately left as a swap of `AudioVisualizer.OnRender`. Controls that are not yet
 implemented are visibly disabled rather than silently inert.

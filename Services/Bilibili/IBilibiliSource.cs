@@ -34,4 +34,22 @@ public interface IBilibiliSource
     /// a missing audio stream is treated as a failure.
     /// </remarks>
     Task<ResolvedMedia> ResolveAsync(string bvid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Searches Bilibili for videos matching <paramref name="keyword"/>.
+    /// </summary>
+    /// <param name="keyword">Free text: a song name, an artist, or both.</param>
+    /// <param name="limit">Maximum number of candidates to return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Candidate videos in the order the endpoint ranked them.</returns>
+    /// <exception cref="BilibiliSourceException">The bridge is missing or the search failed.</exception>
+    /// <remarks>
+    /// Returns candidates rather than a single answer on purpose. The search endpoint mixes official
+    /// uploads, remasters, resolution badges and unrelated videos, and nothing in the payload says
+    /// which one is the song, so the choice is left to the user. An empty list is a valid result.
+    /// </remarks>
+    Task<IReadOnlyList<BilibiliSearchResult>> SearchAsync(
+        string keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
 }

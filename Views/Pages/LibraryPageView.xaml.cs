@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using SongPlayer.Models;
+using SongPlayer.Services.Bilibili;
 using SongPlayer.ViewModels;
 using SongPlayer.ViewModels.Shell;
 
@@ -132,6 +133,35 @@ public partial class LibraryPageView : UserControl
         if (TrackList.SelectedItem is Track track)
         {
             shell.Library.PlayTrackCommand.Execute(track);
+        }
+    }
+
+    /// <summary>
+    /// Resolves and plays the candidate the user picked from the search list.
+    /// </summary>
+    /// <remarks>
+    /// Selecting a candidate is the confirmation step: the list exists precisely because the app
+    /// cannot tell which upload is the song, so a click here means "that one, play it". The row is
+    /// deselected immediately afterwards so the same upload can be picked again after it fails —
+    /// a stale selection would swallow the second click.
+    /// </remarks>
+    private void SearchResults_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel shell)
+        {
+            return;
+        }
+
+        if (sender is not ListBox list || list.SelectedItem is not BilibiliSearchResult candidate)
+        {
+            return;
+        }
+
+        list.SelectedItem = null;
+
+        if (shell.Bilibili.PlayCandidateCommand.CanExecute(candidate))
+        {
+            shell.Bilibili.PlayCandidateCommand.Execute(candidate);
         }
     }
 }

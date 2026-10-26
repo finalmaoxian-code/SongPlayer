@@ -42,8 +42,8 @@ pretends otherwise: unimplemented controls are visibly disabled.
 | UI framework | WPF, `net10.0-windows`, `UseWPF=true` |
 | Language settings | `Nullable=enable`, `ImplicitUsings=enable` |
 | Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0, `LibVLCSharp` 3.10.2, `VideoLAN.LibVLC.Windows` 3.0.24 |
-| C# source | 51 files, 5,807 lines (33% comment lines) |
-| XAML | 17 files, 2,200 lines |
+| C# source | 56 files, 6,782 lines (33% comment lines) |
+| XAML | 17 files, 2,357 lines |
 | Window | 1180×760 default, 900×600 minimum, borderless with a custom caption |
 | Theme | Dark only, token-driven |
 | Build status | `dotnet build` → 0 warnings, 0 errors |
@@ -114,8 +114,10 @@ SongPlayer/
 │   ├── Bilibili/                      │
 │   │   ├── IBilibiliSource.cs         │
 │   │   ├── BilibiliBridgeClient.cs    │
+│   │   ├── BilibiliSearchResult.cs    │
 │   │   ├── BilibiliSourceException.cs │
 │   │   ├── BilibiliCaption.cs         │
+│   │   ├── Bvid.cs                    │
 │   │   ├── DashSegmentProbe.cs        │
 │   │   └── ResolvedMedia.cs           │
 │   ├── Library/                       │
@@ -148,14 +150,14 @@ single point that names concrete services (see §7.10).
 
 | Layer | Files | Lines |
 | --- | ---: | ---: |
-| Design system (`Themes/`) | 7 | 661 |
-| View (`MainWindow.*`, `Views/`, `Controls/`, `Converters/`) | 19 | 1,744 |
-| Presentation state (`ViewModels/`) | 4 | 551 |
-| Domain data (`Models/`) | 3 | 65 |
-| Services (`Services/`) | 11 | 498 |
-| Platform interop (`Interop/`) | 1 | 153 |
-| Composition root (`App.*`, `AssemblyInfo.cs`) | 3 | 83 |
-| **Total** | **48** | **3,755** |
+| Design system (`Themes/`) | 8 | 849 |
+| View (`MainWindow.*`, `Views/`, `Controls/`, `Converters/`) | 21 | 2,786 |
+| Presentation state (`ViewModels/`) | 6 | 1,943 |
+| Domain data (`Models/`) | 5 | 174 |
+| Services (`Services/`) | 29 | 3,099 |
+| Platform interop (`Interop/`) | 1 | 154 |
+| Composition root (`App.*`, `AssemblyInfo.cs`) | 3 | 134 |
+| **Total** | **73** | **9,139** |
 
 ---
 
@@ -194,7 +196,7 @@ means editing `Colors.xaml` alone:
 | `Inputs.xaml` (81) | `SearchBoxStyle` — placeholder text, magnifier glyph, accent focus border |
 | `Navigation.xaml` (77) | `NavItemStyle` — a `RadioButton` with a left accent bar that appears only on the active item |
 | `NowPlaying.xaml` (89) | `ArtworkFrameStyle` (rounded frame + drop shadow), `LyricLineStyle`, `LyricListStyle`, `ChipStyle` |
-| `Library.xaml` (114) | `ColumnHeaderStyle`, `TrackRowStyle` (hover/selected tints, `AutomationProperties.Name` so a row is not announced as a model dump), `TrackListStyle`, `TrackIndexGlyphStyle`, `TrackTitleCellStyle`, `TrackAlbumCellStyle`, `TrackDurationCellStyle` |
+| `Library.xaml` (131) | `ColumnHeaderStyle`, `TrackRowStyle` (hover/selected tints, `AutomationProperties.Name` so a row is not announced as a model dump), `SearchRowStyle` (same look, named after title + uploader instead of title + artist), `TrackListStyle`, `TrackIndexGlyphStyle`, `TrackTitleCellStyle`, `TrackAlbumCellStyle`, `TrackDurationCellStyle` |
 
 ### 4.2 Layer 2 — View
 
@@ -221,7 +223,7 @@ composition root (§7.10).
 | File | Lines | Contents |
 | --- | ---: | --- |
 | `HomePageView.xaml(.cs)` | 185 + 12 | Gradient hero banner with two CTAs, a `UniformGrid` of three quick-access cards (the first shows the live `Library.LibrarySummary`), and a compact "library is empty" card that hides itself once tracks exist. |
-| `LibraryPageView.xaml(.cs)` | 237 + 106 | Two toolbars: library actions (`LibrarySummary`, status line, Clear library, Import folder) and the online row (BV id box + `Play BV…` with its own status line). Then a `ListBox` track table (`#`/TITLE/ALBUM/TIME) and an empty state driven by `Library.HasNoTracks`. Code-behind mirrors `PlayerBar.CurrentTrack` into the list selection and turns a selection into `Library.PlayTrackCommand`, guarded by a flag so mirroring never starts playback. |
+| `LibraryPageView.xaml(.cs)` | 362 + 168 | Three rows in the card: library actions (`LibrarySummary`, status line, Clear library, Import folder), the online row (one box for a keyword *or* a video id, `Search`, `Play BV…`, plus its own status line), and a candidate card that appears only while a search has hits. Below them the `ListBox` track table (`#`/TITLE/ALBUM/TIME) and an empty state driven by `Library.HasNoTracks`. Code-behind mirrors `PlayerBar.CurrentTrack` into the table selection, turns a table selection into `Library.PlayTrackCommand`, and turns a candidate selection into `Bilibili.PlayCandidateCommand` — both guarded so mirroring never starts playback, and the candidate row is cleared straight after the click so the same upload can be picked again. |
 
 **`Views/Overlays/NowPlayingView.xaml(.cs)`** (451 + 113) — the `Grid.RowSpan="3"` layer:
 its own caption strip (back button, `NOW PLAYING`, `OverlayMaximizeButton`), an
@@ -344,7 +346,7 @@ the single place the playback position is published from.
 - `PlaybackFailed` (an event carrying the failed track) exists on top of `StatusMessage`: the
   message is what the bar displays, the event is what the shell needs in order to retry.
 
-**`ViewModels/Shell/BilibiliViewModel.cs` (195 lines)** — the online source input.
+**`BilibiliViewModel.cs` (356 lines)** — the online source input.
 
 - **State**: `Bvid`, `StatusMessage`, `IsBusy`, `HasError`; `TrackResolved` event.
 - **Commands**: `Play` (probe the bridge → resolve → archive the subtitles → pick the duration →
@@ -527,15 +529,17 @@ decoration and must never be able to stop playback. The class lives in `Services
 than `Services/Media` because a `SongPlayer.Services.Media` namespace shadows LibVLCSharp's
 `Media` type inside the audio engine (a `CS0118` that only shows up at the call site).
 
-**`Bilibili/` (622 lines)** — the online source, kept behind one interface so nothing else in
+**`Bilibili/` (969 lines)** — the online source, kept behind one interface so nothing else in
 the app knows Bilibili exists.
 
 | File | Lines | Responsibility |
 | --- | ---: | --- |
-| `IBilibiliSource.cs` | 31 | `ProbeAsync()` / `ResolveAsync(bvid)` |
-| `BilibiliBridgeClient.cs` | 206 | Talks to the local Node bridge on `127.0.0.1:39271`, maps every failure mode to a sentence, never persists the URL, and deserialises the full metadata payload |
+| `IBilibiliSource.cs` | 56 | `ProbeAsync()` / `SearchAsync(keyword, limit)` / `ResolveAsync(bvid)` |
+| `BilibiliBridgeClient.cs` | 405 | Talks to the local Node bridge on `127.0.0.1:39271`, maps every failure mode to a sentence, never persists the URL, and deserialises both payloads |
+| `BilibiliSearchResult.cs` | 55 | `(Bvid, Title, Uploader, Duration, CoverUri, Description)` — a candidate, deliberately not a `Track` |
+| `Bvid.cs` | 75 | The id rule in one place: 12 characters, `BV` prefix, alphanumerics; plus `FromStreamKey("bilibili:BV…")` |
 | `DashSegmentProbe.cs` | 293 | Reads the real duration out of the stream's `sidx` box (with an `mvhd` fallback) |
-| `BilibiliSourceException.cs` | 30 | Carries a message written for the user |
+| `BilibiliSourceException.cs` | 31 | Carries a message written for the user |
 | `BilibiliCaption.cs` | 14 | `(Seconds, Text)` — a timed subtitle line |
 | `ResolvedMedia.cs` | 40 | `(Bvid, AudioUri, Title, Uploader, CoverUri, Description, Duration, Captions)` |
 
@@ -547,6 +551,21 @@ read `sidx`, and the video-info endpoint is simply more reliable when it answers
 metadata is *best effort*: a missing title falls back to the BV id, `Uploader` to `"Bilibili"`
 and every caption failure to an empty list — only a missing audio URL is treated as a resolve
 failure, because that is the only field playback cannot live without.
+
+Search exists because the endpoint that finds videos is **not** an answer machine. A keyword query
+returns twenty uploads for a song, mixing the official video with 4K remasters, hour-long
+compilations and videos that merely mention the words, so the app cannot pick one and call it the
+song. `SearchAsync` therefore returns candidates and the page shows them; the listener chooses,
+which is the only step that can honestly decide. Two consequences shaped the code: the bridge
+strips the `<em class="keyword">` highlight markup and converts `"4:30"` to seconds before the rows
+ever reach C#, and `BilibiliSearchResult` is a record of its own rather than a `Track`, because a
+candidate has no audio URL and most of them will never be played.
+
+Both bridge calls go through one `GetFromBridgeAsync<TPayload>` helper rather than
+`GetFromJsonAsync`. The convenience overload throws on any non-success status *and discards the
+body*, and the body is where the bridge explains itself — a Bilibili rate limit reached the user
+as "could not reach the local bridge", which sends them off to restart a process that was running
+fine.
 
 ### 4.6 Layer 6 — Platform interop (`Interop/`)
 
@@ -589,6 +608,16 @@ borderless window is maximized (see §7.5).
    clear ──► Library.ClearLibraryCommand ──► IConfirmationPrompt.Confirm
                                                  ├─ No  ──► StatusMessage = "Library left unchanged."
                                                  └─ Yes ──► Tracks.Clear() ──► LibraryStore.SaveAsync([])
+
+   type a keyword ──► Bilibili.SearchCommand ──► IBilibiliSource.SearchAsync
+                        (IsSearching gate)        └─► "GET /search?keyword=&limit="
+                                                     └─► SearchResults (ranked, unfiltered)
+                                                          └─► SearchSummary ──► candidate card
+                                                               (visible only while HasSearchResults)
+
+   pick a candidate ──► (code-behind) Bilibili.PlayCandidateCommand
+                          ├─► SearchText = candidate.Bvid  ("Play BV…" lights up)
+                          └─► PlayAsync() ──► see below
 
    paste BV id ──► Bilibili.PlayCommand ──► IBilibiliSource
                      (IsBusy gate)            ├─► ProbeAsync  ("/health" - no bridge, no 20 s wait)
@@ -689,10 +718,11 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Custom-drawn slider (seek + volume) | ✅ | `Controls/SlimSlider.cs` | Click, drag, hover thumb |
 | Play / pause | ✅ | `PlayerBarViewModel.TogglePlayback` → `LibVlcAudioPlayer` | Glyph follows `IsPlaying`, which follows the engine |
 | Playback position advancing | ✅ | `Services/Audio/LibVlcAudioPlayer.cs` | 250 ms poll of `MediaPlayer.Time` into `PositionSeconds`; the lyric highlight and both labels follow it |
-| Search filtering | ⛔ | `MainWindowViewModel.SearchText` | Box is bound but nothing consumes the text |
+| Search filtering over the local library | ⛔ | `MainWindowViewModel.SearchText` | The header box is bound but nothing consumes the text; online search lives on the Local Music page instead |
 | Library scanning / import folder | ✅ | `ViewModels/Pages/LibraryPageViewModel.cs` + `Services/Library/` | Folder picker → recursive scan → tag read → dedupe → `library.json`; both "Import folder" buttons are live |
 | Audio decoding & output | ✅ | `Services/Audio/LibVlcAudioPlayer.cs` | LibVLC 3.0.24 through `LibVLCSharp`; mp3/flac/wav/m4a/aac/wma/ogg/opus, plus HTTP streams |
 | Online source: Bilibili BV id to audio | ✅ | `ViewModels/Shell/BilibiliViewModel.cs` + `Services/Bilibili/` | Needs the local Node bridge on `127.0.0.1:39271`; the signed URL is resolved per play request and never stored |
+| Search Bilibili by song or artist, then pick an upload | ✅ | `BilibiliViewModel.SearchCommand` + bridge `/search` | The endpoint returns a ranked mix of the official video, remasters, compilations and unrelated hits, so the app shows candidates instead of playing the first one (§4.5) |
 | Expired stream URL re-resolved once | ✅ | `MainWindowViewModel.OnPlayerBarPlaybackFailed` | A CDN link that rejects the request is re-resolved and replayed once per play request, then reported |
 | Tag reading | ✅ | `Services/Library/TrackMetadataReader.cs` | Title/artist/duration/album/track number feed both the table and the player bar |
 | Cover art | ✅ (online) / 🟡 (local) | `Services/Artwork/CoverImageLoader.cs` | A Bilibili thumbnail is downloaded and painted in both artwork frames; embedded tag pictures for local files are not read yet, and those keep the glyph |
@@ -918,6 +948,14 @@ up, and each one failed on its own during development:
 - **Online playback needs a second process.** Bilibili audio comes through the Node bridge in
   the sibling `SongPlayer.SourceLab` project; if it is not running, the page says so and local
   playback is unaffected. SongPlayer does not speak the Bilibili API itself.
+- **Search is rate limited, and says so.** Bilibili answers burst searches with `412`/`429`; the
+  bridge turns those into a 429 with its own reason, and the page shows
+  `The bridge refused the request (429): …` instead of pretending the bridge is down. Waiting a
+  minute is the only fix, so the message does not offer a button.
+- **Search results are strangers.** A keyword that matches a song returns the official video next
+  to remasters, hour-long compilations and videos that merely mention the words. Nothing filters
+  by duration, view count or uploader type: the list is the endpoint's ranking, and choosing is
+  the listener's job (§4.5).
 - **Saved streams need one extra network round trip.** An online track is remembered by its
   stream key, so it reappears after a restart with its cached title, uploader, length and
   thumbnail — but a restored row carries no URL until it is selected, and selecting it resolves
@@ -928,7 +966,9 @@ up, and each one failed on its own during development:
 - **The library is real but shallow.** Import, persistence and the track table work, yet there
   is no search over it, no sort, no per-track removal (only `Clear library`, which now asks for
   confirmation but still has no undo), no progress report for a very large folder, and no
-  duplicate detection beyond the file path and the stream key.
+  duplicate detection beyond the file path and the stream key. The header's search box filters
+  nothing — online search is a different box on the Local Music page, and it queries Bilibili,
+  not the imported rows.
 - **Local artwork is still a glyph.** Embedded tag pictures are not read; a local file shows the
   `ArtworkGlyph` frame. Only online tracks get a real image, because only they carry a URL.
 - **Subtitles are usually invisible.** Most Bilibili subtitle tracks are served only to a
@@ -967,11 +1007,20 @@ and calls `PlayTrack`, and it becomes the `CanExecute` gate for `next`/`previous
 
 **Add a second online source**
 `IBilibiliSource` is shaped for Bilibili only because the bridge is. For a second platform,
-add a sibling interface (or generalise this one to `IMusicSource.ResolveAsync(string id)`),
-implement it next to `BilibiliBridgeClient`, and construct it in `App.xaml.cs`; reuse
-`DashSegmentProbe` if the source serves a fragmented MP4, or let the platform metadata supply
-the duration. `BilibiliViewModel` is the template for the input: one `Play` command that
-probes, resolves and raises `TrackResolved` with an ordinary `Track`.
+add a sibling interface (or generalise this one to `IMusicSource.ResolveAsync(string id)` plus
+`SearchAsync(keyword)`), implement it next to `BilibiliBridgeClient`, and construct it in
+`App.xaml.cs`; reuse `DashSegmentProbe` if the source serves a fragmented MP4, or let the
+platform metadata supply the duration. `BilibiliViewModel` is the template for the input: a
+`Search` command that fills a candidate collection and a `Play` command that probes, resolves
+and raises `TrackResolved` with an ordinary `Track`. Keep the two entry points separate — a
+candidate is not a track, and resolving is what turns one into the other.
+
+**Add a provider to the bridge**
+`SongPlayer.SourceLab/bridge.cjs` is a plain `http` server with three routes. A new provider is
+a `fetchJson` call plus one route; return `{source, bvid, audioUrl, …}` for a resolve or a
+`results` array for a search, and put the failure reason in an `{error}` body — the C# side reads
+that body and shows it verbatim (§4.5). Bump the `capabilities` array on `/health` when the
+contract changes, so a stale bridge can be detected instead of guessed at.
 
 **Swap the audio engine**
 `IAudioPlayer` is the only contract the view models know, and `MediaPlayerAudioPlayer` (WPF
@@ -1002,8 +1051,12 @@ changes. `ArtworkFrameStyle` and the overlay's `Viewbox` already handle sizing.
 `LibraryPageViewModel` owns the only `Tracks` collection. Put the filter and the sort keys in
 the view model (an `ICollectionView`, or a derived collection raised next to `LibrarySummary`)
 rather than in the view, so "no results" is a property such as `HasNoMatches` instead of a
-`DataTrigger` per state. Reuse the shell's existing `SearchText` so the header box and the
-library agree.
+`DataTrigger` per state.
+
+Note the box on that page already means something else: `BilibiliViewModel.SearchText` queries
+Bilibili and is not a filter over `Tracks`. Wire the header's `MainWindowViewModel.SearchText`
+to the local filter and let the two boxes say what they do, rather than merging them — one asks
+a remote service for strangers, the other narrows rows the app already owns.
 
 **Remove a single track**
 De-duplication lives in `LibraryEntry.Key` (a path for a local file, a stream key for an online
