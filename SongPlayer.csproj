@@ -8,11 +8,12 @@
     <UseWPF>true</UseWPF>
     <!--
       LibVLC ships one native build per architecture, so the executable has to commit to one.
-      AnyCPU would pick whatever bitness the process happens to load in and then fail to find
-      the matching libvlc.dll.
+      The runtime identifier is what pins it, and it is enough on its own: win-x64 selects the
+      x64 native package and the x64 app host, so even a "Debug|Any CPU" build here produces an
+      x64 process (verified: PE machine 0x8664). Declaring a second <Platforms> entry would
+      instead make the solution pick one platform only and leave Visual Studio holding a
+      configuration it cannot launch.
     -->
-    <Platforms>x64</Platforms>
-    <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 

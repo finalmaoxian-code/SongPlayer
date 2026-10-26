@@ -11,6 +11,12 @@ cover art and the lyric sheet, and closing it returns you to the page you came f
 
 - .NET 10 SDK (or the runtime matching the `TargetFramework` in `SongPlayer.csproj`)
 - Windows 10 version 1809 or later
+- For online playback only: Node.js and the sibling `SongPlayer.SourceLab` project, started
+  with `node bridge.cjs` (it listens on `127.0.0.1:39271`). Local files need nothing extra.
+
+The build pins `RuntimeIdentifier=win-x64` because LibVLC ships one native build per
+architecture. Leave the solution platform on **Any CPU** — the identifier already produces an
+x64 process, so no platform switching is required.
 
 ## Getting started
 

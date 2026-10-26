@@ -777,7 +777,7 @@ These were checked and are currently clean; they are worth keeping clean:
 | No missing style keys | diff used vs. defined `StaticResource` keys | 0 missing |
 | No dead style keys | same diff, reversed | 0 unused |
 | Binding paths resolve | every `{Binding X}` in `Views/` checked against the view model it inherits | checked manually, not by the compiler — bindings fail at runtime in WPF |
-| Native dependency present | `bin/Debug/net10.0-windows/win-x64/libvlc/win-x64/libvlc.dll` after a build | the project is pinned to `x64` / `win-x64`; `AnyCPU` cannot resolve one native build per architecture |
+| Native dependency present | `bin/Debug/net10.0-windows/win-x64/libvlc/win-x64/libvlc.dll` after a build | `RuntimeIdentifier=win-x64` alone pins the process to x64 (verified PE machine 0x8664), so the solution keeps its single `Any CPU` platform and Visual Studio stays launchable |
 | Comments on non-obvious code | comment-line ratio per file | 34% overall; every public type and command documented |
 | Runtime smoke test | launch, navigate every page, open/close the overlay, maximize, seek | passes at 1180×760 and 1920×1032 |
 
