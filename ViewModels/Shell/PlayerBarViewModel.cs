@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
+using SongPlayer.Services.Audio;
 
 namespace SongPlayer.ViewModels.Shell;
 
@@ -15,6 +16,25 @@ namespace SongPlayer.ViewModels.Shell;
 /// </remarks>
 public partial class PlayerBarViewModel : ObservableObject
 {
+    /// <summary>
+    /// Engine that executes the transport commands. Null while no engine is wired up, which is
+    /// why every call is null-conditional: the bar stays usable as a pure UI shell.
+    /// </summary>
+    private readonly IAudioPlayer? _audioPlayer;
+
+    /// <summary>
+    /// Creates the player bar without an audio engine, so it only tracks visual state.
+    /// </summary>
+    public PlayerBarViewModel()
+    {
+    }
+
+    /// <summary>
+    /// Creates the player bar that forwards transport commands to <paramref name="audioPlayer"/>.
+    /// </summary>
+    /// <param name="audioPlayer">Engine that turns the commands into actual playback.</param>
+    public PlayerBarViewModel(IAudioPlayer audioPlayer) => _audioPlayer = audioPlayer;
+
     /// <summary>
     /// Track shown in the player bar. <see cref="Track.Empty"/> means nothing is loaded.
     /// The sample track is preloaded so the player bar and the Now Playing page can be
@@ -99,11 +119,22 @@ public partial class PlayerBarViewModel : ObservableObject
     public string PlayPauseTooltip => IsPlaying ? "Pause" : "Play";
 
     /// <summary>
-    /// Toggles the playback state. The audio pipeline is not wired up yet, so this only
-    /// updates the visual state.
+    /// Toggles the playback state and forwards the resulting instruction to the audio engine.
     /// </summary>
     [RelayCommand(CanExecute = nameof(HasTrack))]
-    private void TogglePlayback() => IsPlaying = !IsPlaying;
+    private void TogglePlayback()
+    {
+        IsPlaying = !IsPlaying;
+
+        if (IsPlaying)
+        {
+            _audioPlayer?.Play(CurrentTrack, TimeSpan.FromSeconds(PositionSeconds));
+        }
+        else
+        {
+            _audioPlayer?.Pause();
+        }
+    }
 
     /// <summary>
     /// Refreshes the track labels and re-evaluates the transport command whenever the
@@ -131,9 +162,17 @@ public partial class PlayerBarViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Keeps the position label in sync while seeking or playing.
+    /// Keeps the position label in sync while seeking or playing, and moves the playhead.
     /// </summary>
-    partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
+    /// <remarks>
+    /// A slider drag raises this for every pixel, so the engine is asked to seek continuously
+    /// rather than once on release; a real engine is expected to coalesce those seeks.
+    /// </remarks>
+    partial void OnPositionSecondsChanged(double value)
+    {
+        OnPropertyChanged(nameof(PositionText));
+        _audioPlayer?.Seek(TimeSpan.FromSeconds(value));
+    }
 
     /// <summary>
     /// Formats a duration as <c>m:ss</c> or <c>h:mm:ss</c> for long tracks.

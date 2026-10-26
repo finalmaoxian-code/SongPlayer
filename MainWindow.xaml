@@ -23,6 +23,7 @@
     WindowStartupLocation="CenterScreen"
     WindowStyle="None"
     ResizeMode="CanResize"
+    d:DataContext="{d:DesignInstance Type=vm:MainWindowViewModel, IsDesignTimeCreatable=True}"
     mc:Ignorable="d">
 
     <!--
@@ -41,14 +42,10 @@
     </shell:WindowChrome.WindowChrome>
 
     <!--
-        The shell view model is instantiated here so the window keeps a single DataContext and
-        every composed view inherits it. Each view sets its own layout slot (row/column) and
-        its own visibility, so this file is only the assembly of the shell.
+        The shell view model is provided by the composition root in App.xaml.cs, so the window
+        keeps a single DataContext and every composed view inherits it. The design-time instance
+        below is what the XAML designer previews; it is stripped at runtime.
     -->
-    <Window.DataContext>
-        <vm:MainWindowViewModel />
-    </Window.DataContext>
-
     <Grid>
         <Grid.RowDefinitions>
             <!-- Custom caption -->

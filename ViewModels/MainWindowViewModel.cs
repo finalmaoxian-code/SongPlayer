@@ -2,6 +2,7 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
+using SongPlayer.Services.Audio;
 using SongPlayer.Services.Lyrics;
 using SongPlayer.ViewModels.Shell;
 
@@ -25,21 +26,29 @@ public partial class MainWindowViewModel : ObservableObject
     /// Creates the shell for the sample track and its lyrics.
     /// </summary>
     /// <remarks>
-    /// The parameterless overload is what XAML instantiates; it uses the sample lyric provider so
-    /// the shell is self-contained until the composition root constructs it with real services.
+    /// This overload is the design-time fallback: it builds the whole shell from the default
+    /// providers so the XAML designer and a bare <c>new MainWindow()</c> both show something
+    /// sensible. The composition root in <c>App</c> passes the real services instead.
     /// </remarks>
     public MainWindowViewModel()
-        : this(new SampleLyricProvider())
+        : this(new SampleLyricProvider(), audioPlayer: null)
     {
     }
 
     /// <summary>
-    /// Creates the shell with the child view models wired to the given lyric provider.
+    /// Creates the shell with the child view models wired to the given services.
     /// </summary>
     /// <param name="lyricProvider">Source of the timed lyrics shown on the Now Playing overlay.</param>
-    public MainWindowViewModel(ILyricProvider lyricProvider)
+    /// <param name="audioPlayer">
+    /// Engine that executes the transport commands, or <c>null</c> to keep the transport purely
+    /// visual.
+    /// </param>
+    public MainWindowViewModel(ILyricProvider lyricProvider, IAudioPlayer? audioPlayer = null)
     {
-        PlayerBar = new PlayerBarViewModel();
+        PlayerBar = audioPlayer is null
+            ? new PlayerBarViewModel()
+            : new PlayerBarViewModel(audioPlayer);
+
         NowPlaying = new NowPlayingViewModel(lyricProvider);
         NowPlaying.LoadFor(PlayerBar.CurrentTrack);
 
