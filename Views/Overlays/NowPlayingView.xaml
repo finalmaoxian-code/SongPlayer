@@ -284,7 +284,7 @@
             </Border>
 
             <!-- ===================================================== -->
-            <!-- Lyrics                                                -->
+            <!-- Visualizer / lines                                    -->
             <!-- ===================================================== -->
             <Border
                 Grid.Column="1"
@@ -301,17 +301,58 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock
-                            Text="{Binding NowPlaying.SectionLabel}"
-                            Style="{StaticResource SectionLabelStyle}" />
+                        <!--
+                            Two chips instead of a single toggle: a segmented control shows both
+                            options and which one is active, where a toggle would only label the
+                            state the user is not in. The selection lives in the view model, so
+                            each chip only mirrors it into IsChecked (OneWay).
+                        -->
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton
+                                GroupName="OverlayCard"
+                                Content="Visualizer"
+                                IsChecked="{Binding NowPlaying.IsVisualizerSelected, Mode=OneWay}"
+                                Command="{Binding NowPlaying.ShowVisualizerCommand}"
+                                Style="{StaticResource OverlayTabStyle}" />
+                            <RadioButton
+                                GroupName="OverlayCard"
+                                Margin="8,0,0,0"
+                                Content="{Binding NowPlaying.SectionLabel}"
+                                IsChecked="{Binding NowPlaying.IsLyricsSelected, Mode=OneWay}"
+                                IsEnabled="{Binding NowPlaying.CanShowLyrics}"
+                                Command="{Binding NowPlaying.ShowLyricsCommand}"
+                                Style="{StaticResource OverlayTabStyle}"
+                                ToolTip="Timed lines for this track, when it has any" />
+                        </StackPanel>
 
                         <TextBlock
                             Grid.Column="1"
                             HorizontalAlignment="Right"
+                            Margin="0,0,12,0"
                             Text="Click a line to jump"
-                            Style="{StaticResource CaptionTextStyle}" />
+                            Style="{StaticResource CaptionTextStyle}"
+                            Visibility="{Binding NowPlaying.IsLyricsSelected, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
+
+                    <!-- The live spectrum: what the track is doing right now -->
+                    <Grid
+                        Grid.Row="1"
+                        Visibility="{Binding NowPlaying.IsVisualizerSelected, Converter={StaticResource BoolToVisibility}}">
+                        <controls:AudioVisualizer
+                            Margin="6,0,6,0"
+                            AccentBrush="{StaticResource AccentBrush}"
+                            IdleBrush="{StaticResource Surface4Brush}"
+                            IsPlaying="{Binding PlayerBar.IsPlaying}" />
+                        <TextBlock
+                            Margin="0,0,0,6"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            Text="{Binding PlayerBar.TrackAlbumPosition}"
+                            Style="{StaticResource CaptionTextStyle}"
+                            Foreground="{StaticResource TextTertiaryBrush}" />
                     </Grid>
 
                     <!--
@@ -319,7 +360,9 @@
                         IsActive, which the item style turns into the accent highlight.
                         Clicking a row seeks through SeekToLyricCommand.
                     -->
-                    <Grid Grid.Row="1">
+                    <Grid
+                        Grid.Row="1"
+                        Visibility="{Binding NowPlaying.IsLyricsSelected, Converter={StaticResource BoolToVisibility}}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
@@ -365,12 +408,15 @@
                         Visibility="{Binding NowPlaying.HasSourceNotice, Converter={StaticResource BoolToVisibility}}" />
                     </Grid>
 
-                    <!-- Shown for tracks that carry no lyric data yet -->
+                    <!--
+                        Shown for tracks that carry no lyric data yet. It has to be hidden on the
+                        visualiser card as well, otherwise the hint floats over the spectrum.
+                    -->
                     <StackPanel
                         Grid.Row="1"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Visibility="{Binding NowPlaying.HasLyrics, Converter={StaticResource InverseBoolToVisibility}}">
+                        Visibility="{Binding NowPlaying.ShowsEmptyLyricState, Converter={StaticResource BoolToVisibility}}">
                         <Border
                             Width="56"
                             Height="56"

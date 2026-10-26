@@ -42,8 +42,8 @@ pretends otherwise: unimplemented controls are visibly disabled.
 | UI framework | WPF, `net10.0-windows`, `UseWPF=true` |
 | Language settings | `Nullable=enable`, `ImplicitUsings=enable` |
 | Only NuGet dependencies | `CommunityToolkit.Mvvm` 8.4.2, `TagLibSharp` 2.3.0, `LibVLCSharp` 3.10.2, `VideoLAN.LibVLC.Windows` 3.0.24 |
-| C# source | 47 files, 4,847 lines (34% comment lines) |
-| XAML | 17 files, 2,121 lines |
+| C# source | 51 files, 5,807 lines (33% comment lines) |
+| XAML | 17 files, 2,200 lines |
 | Window | 1180×760 default, 900×600 minimum, borderless with a custom caption |
 | Theme | Dark only, token-driven |
 | Build status | `dotnet build` → 0 warnings, 0 errors |
@@ -83,7 +83,9 @@ SongPlayer/
 │   │   └── LibraryPageView.xaml       │
 │   └── Overlays/                      │
 │       └── NowPlayingView.xaml        │
-├── Controls/SlimSlider.cs             │
+├── Controls/                          │
+│   ├── SlimSlider.cs                  │
+│   └── AudioVisualizer.cs            ─┼─  LAYER 2 — View (custom-drawn controls)
 ├── Converters/BoolToVisibilityConverter.cs
 │                                      ─┘
 ├── ViewModels/                       ─┐
@@ -98,12 +100,15 @@ SongPlayer/
 │   ├── Track.cs                       │  LAYER 4 — Domain data
 │   ├── PlayerPage.cs                  │  (immutable records / enums)
 │   ├── LyricLine.cs                   │
+│   ├── OverlayView.cs                 │
 │   └── TimeSpanFormatting.cs          │
 │                                      ─┘
 ├── Services/                         ─┐
 │   ├── Audio/                         │  LAYER 5 — Services
 │   │   ├── IAudioPlayer.cs            │  (interfaces + implementations;
-│   │   └── LibVlcAudioPlayer.cs       │   no view, no WPF types)
+│   │   ├── LibVlcAudioPlayer.cs       │   no view logic)
+│   │   ├── SpectrumAnalyzer.cs        │
+│   │   └── WasapiAudioTap.cs          │
 │   ├── Artwork/                       │
 │   │   └── CoverImageLoader.cs        │
 │   ├── Bilibili/                      │
@@ -217,11 +222,14 @@ composition root (§7.10).
 | `HomePageView.xaml(.cs)` | 185 + 12 | Gradient hero banner with two CTAs, a `UniformGrid` of three quick-access cards (the first shows the live `Library.LibrarySummary`), and a compact "library is empty" card that hides itself once tracks exist. |
 | `LibraryPageView.xaml(.cs)` | 237 + 106 | Two toolbars: library actions (`LibrarySummary`, status line, Clear library, Import folder) and the online row (BV id box + `Play BV…` with its own status line). Then a `ListBox` track table (`#`/TITLE/ALBUM/TIME) and an empty state driven by `Library.HasNoTracks`. Code-behind mirrors `PlayerBar.CurrentTrack` into the list selection and turns a selection into `Library.PlayTrackCommand`, guarded by a flag so mirroring never starts playback. |
 
-**`Views/Overlays/NowPlayingView.xaml(.cs)`** (405 + 113) — the `Grid.RowSpan="3"` layer:
+**`Views/Overlays/NowPlayingView.xaml(.cs)`** (451 + 113) — the `Grid.RowSpan="3"` layer:
 its own caption strip (back button, `NOW PLAYING`, `OverlayMaximizeButton`), an
 artwork/facts/transport card on the left (the artwork `Border` paints `PlayerBar.CoverImage`
-over a stretched background so the decoded bitmap has a size to fill), and the line sheet on
-the right. Its code-behind holds the two genuinely view-only concerns: `ActiveLyricIndex` →
+over a stretched background so the decoded bitmap has a size to fill), and on the right a
+**two-card cell** with a segmented header: the spectrum visualiser by default, and the timed
+line sheet when `NowPlaying.IsLyricsSelected` is true. The empty "no lines" panel is keyed on
+`ShowsEmptyLyricState`, not on `!HasLyrics`, because both cards occupy the same cell and a
+panel keyed only on the absence of lines would float over the spectrum. Its code-behind holds the two genuinely view-only concerns: `ActiveLyricIndex` →
 `BringIntoView()` scrolling (deferred to `DispatcherPriority.Loaded` so freshly realised
 containers have a valid position) and click-to-seek on a line.
 
@@ -247,6 +255,26 @@ does not invalidate the visual, which is invisible on the stock control (its `Tr
 parts repaint themselves) but left the hand-drawn fill frozen at its last paint — the playhead
 looked stuck until the mouse moved over the bar (§7.6). The thumb dot appears only on hover or while dragging, so
 the resting player bar stays flat.
+
+**`Controls/AudioVisualizer.cs` (347 lines)** — the spectrum bars, drawn by hand on a
+`FrameworkElement`. `BandCount` = 32 bars mirrored around a centre seam, so roughly 16 audible
+bands are visible per side; the seam carries a soft accent glow whose opacity follows the
+overall pulse. Four details matter:
+
+- **It owns the capture, not the view model.** A `WasapiAudioTap` needs a device stream and a
+  background thread; only the view knows whether the visualiser is on screen. Handing the tap to
+  `NowPlayingViewModel` would tie a WASAPI stream's lifetime to a view model that outlives the
+  overlay (the overlay is a permanently parented `Grid` sibling whose `Visibility` flips), so the
+  stream would stay open while the card is hidden.
+- **Start and stop follow the visual tree.** `IsVisibleChanged` plus `IsPlaying` feed one
+  `UpdateCaptureState()`, and the render loop is a `CompositionTarget.Rendering` subscription that
+  is removed the moment playback stops — a paused overlay costs no frames.
+- **Silence still draws.** With no signal it falls back to a slow idle wave (`IdleBrush`, a 33 ms
+  `DispatcherTimer`) instead of collapsing to a flat line, which is what tells the user the
+  control is alive but has nothing to show.
+- **It has no failure path into the UI.** Everything that can go wrong (unsupported Windows
+  version, device refusal) is swallowed by the tap; a broken spectrum must never take the player
+  down with it.
 
 **`Converters/BoolToVisibilityConverter.cs` (38 lines)** — one converter with an `Invert`
 flag, registered twice in `App.xaml` as `BoolToVisibility` and `InverseBoolToVisibility`.
@@ -329,9 +357,16 @@ the single place the playback position is published from.
 - It builds a normal `Track` with `StreamKey` / `StreamUri` set, so online playback is not a
   second player — it is a track the existing transport already understands (§7.12).
 
-**`ViewModels/Shell/NowPlayingViewModel.cs` (175 lines)** — the karaoke half of the overlay.
+**`ViewModels/Shell/NowPlayingViewModel.cs` (239 lines)** — the right-hand card of the overlay.
 
 - `Lyrics` (an `ObservableCollection<LyricLineViewModel>`), `HasLyrics`, `ActiveLyricIndex`.
+- `ActiveView` (an `OverlayView`) selects the card: `IsVisualizerSelected` / `IsLyricsSelected`
+  feed the segmented header, `ShowsEmptyLyricState` gates the "nothing here" panel,
+  `CanShowLyrics` (= `HasLyrics`) disables the lyrics chip when there is nothing to read. The
+  header items are `RadioButton`s in one `GroupName`, styled by `OverlayTabStyle`; their
+  `IsChecked` is `Mode=OneWay` off the view model, so the control never holds a second copy of
+  the selection (§7.14). `LoadFor` resets the card to the visualiser — a new track with no timed
+  lines should not open on an empty sheet.
 - `LoadFor(Track)` rebuilds the rows from the injected `ILyricProvider`, remembers the track and
   re-raises the five wording properties;
   `UpdateActiveLyric(TimeSpan)` picks the last line whose start time ≤ position and flips only
@@ -373,6 +408,7 @@ rows that change, instead of invalidating the whole list.
 | `Track.cs` (97) | `sealed record Track(string Title, string Artist, TimeSpan Duration, string? FilePath = null, string? Album = null, int? TrackNumber = null, string? StreamKey = null, string? StreamUri = null, string? CoverUri = null)` with `IsPlayable` (a local path *or* a stream), `IsStream`, `HasCover`, `DurationText`, `AlbumText` (an em dash when the file has no album tag), plus `Track.Empty` and `Track.Sample` so the player bar is reviewable before anything is imported. `StreamKey` is durable identity for de-duplication; `StreamUri` is a temporary signed URL and is never persisted; `CoverUri` is an `http(s)` thumbnail address and is only ever a *source* for the loader, never an `ImageSource` in a binding |
 | `PlayerPage.cs` (15) | `enum PlayerPage { Home, Library }` — the overlay is intentionally *not* a member |
 | `LyricLine.cs` (12) | `sealed record LyricLine(TimeSpan Time, string Text)` |
+| `OverlayView.cs` (18) | `enum OverlayView { Visualizer, Lyrics }` — which card the overlay's right-hand cell shows. `Visualizer` is the default because it is meaningful for every track, while timed lines are absent for most online ones |
 | `TimeSpanFormatting.cs` (28) | `ToClock(TimeSpan)` → `m:ss` / `h:mm:ss`; one home for the clock format instead of a private helper per view model |
 
 These are pure data: no WPF types, no notification, no behaviour. The sample lyrics that used
@@ -417,8 +453,11 @@ skips empty results rather than overwriting a transcript that was readable yeste
 lines are stored — never the audio URL, which is signed with a deadline — and entries are keyed
 by the durable `StreamKey` rather than by the URL that expires.
 
-**`Audio/` (514 lines)** — `IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`,
-`Seek`, plus `PositionChanged` / `PlaybackEnded` / `PlaybackFailed`) and
+**`Audio/` (1,089 lines)** — the playback half (`IAudioPlayer` + `LibVlcAudioPlayer`) plus the
+capture half (`WasapiAudioTap` + `SpectrumAnalyzer`).
+
+`IAudioPlayer` (`IsPlaying`, `Volume`, `Play`, `Pause`, `Stop`, `Seek`, plus
+`PositionChanged` / `PlaybackEnded` / `PlaybackFailed`) and
 `LibVlcAudioPlayer`, the real engine: `LibVLCSharp`'s `MediaPlayer` wrapped so no view model
 ever sees an engine type. Four details carry the design:
 
@@ -444,6 +483,37 @@ ever sees an engine type. Four details carry the design:
 
 Both LibVLC objects have UI-thread affinity and are created in `App.OnStartup`, which is also
 why `App.OnExit` disposes them — an open media keeps the audio output device alive (§7.10).
+
+`WasapiAudioTap` (237 lines) captures **what the machine is playing**, not what SongPlayer hands
+the engine, which is why the bars follow the audio even though LibVLC never exposes its decoded
+PCM. It is built on NAudio 3.3's `WasapiRecorderBuilder.WithProcessLoopback(pid,
+ProcessLoopbackMode.IncludeTargetProcessTree)`, so it records this process only and a video on
+another window does not leak into the spectrum. Three constraints shaped it:
+
+- **`BuildAsync`, not `Build`.** Process loopback capture is activated asynchronously; `Build()`
+  throws `InvalidOperationException`. The tap therefore starts with `_ = StartAsync()` and never
+  blocks the UI thread on device negotiation.
+- **The device format wins.** The recorder reports its own `WaveFormat` (typically 32-bit float,
+  44.1 or 48 kHz, stereo), and the tap rebuilds its `SpectrumAnalyzer` from *that* rather than
+  from an assumed rate. `Stop()` keeps the recorder alive and only clears `_captureStarted`, so a
+  pause/resume cycle reuses the negotiated stream instead of reopening it.
+- **A failed tap is silent.** Unsupported Windows builds (< 10.0.19041) and device refusals are
+  reported through one `Faulted` event and otherwise swallowed: a missing visualiser must never
+  break playback.
+
+`SpectrumAnalyzer` (340 lines) turns buffers into 32 band levels. A 2048-point Hann-windowed FFT
+per buffer, log-spaced bands from 40 Hz to 9 kHz, each band taking the **loudest bin** rather than
+the mean (a mean smears a pure tone into every band at once). Three numerical details were tuned
+against a real capture rather than guessed:
+
+- **Per-band noise floor**, adapted asymmetrically: it drops to any quieter reading immediately
+  but climbs at most `FloorRiseDbPerSecond`, because a single shared floor let the quietest
+  treble band pin the whole display to the bottom.
+- **Decay before analyse.** Peaks fall by elapsed time *first*, then the new measurement is
+  merged, otherwise each frame subtracted the peak it had just found and the bars never rose.
+- **Neighbour bleed.** Each band also takes 35 % of its louder neighbour. Without it a pure tone
+  lights three bars out of thirty-two and the render looks broken; real music already bleeds, so
+  the effect is invisible on it.
 
 **`Artwork/` (99 lines)** — `CoverImageLoader.LoadAsync(string? uri, CancellationToken)` returns
 a frozen `BitmapImage` or `null`. Three details: the request carries a browser user agent and a
@@ -521,6 +591,16 @@ borderless window is maximized (see §7.5).
                                                                                 ├─► PlayerBar.PlayTrack
                                                                                 └─► CurrentPage = Library
 
+   choose a card ──► NowPlaying.ShowLyricsCommand / ShowVisualizerCommand ──► ActiveView
+                        (chip disabled when !HasLyrics)                        ├─► IsLyricsSelected
+                                                                               ├─► IsVisualizerSelected
+                                                                               └─► ShowsEmptyLyricState
+
+   play ──► PlayerBar.IsPlaying ──► AudioVisualizer.IsPlaying ──► WasapiAudioTap.Start/Stop
+                                          (only while the card is visible)  └─► SpectrumAnalyzer
+                                                                                └─► 32 band levels
+                                                                                      └─► OnRender
+
    track loaded ──► PlayerBar.CurrentTrack ──► OnCurrentTrackChanged
                           ├─► CoverImageLoader.LoadAsync(Track.CoverUri) ──► CoverImage ──► ImageBrush
                           │     (cancelled on the next track; result dropped if the track moved on)
@@ -593,6 +673,8 @@ Legend: ✅ done · 🟡 visual only / stubbed · ⛔ not started
 | Player bar | ✅ | `Views/Shell/PlayerBarView.xaml` | Real cover art, metadata with an honest source/artist line, transport, seek, volume |
 | Now Playing overlay (open/close, Esc, covers the shell) | ✅ | `Views/Overlays/NowPlayingView` | |
 | Lyric sheet with karaoke highlight | ✅ | `ViewModels/Shell/NowPlayingViewModel.cs`, `Themes/NowPlaying.xaml` | Highlight logic is real, driven by `PositionSeconds`; the header says `LYRICS` or `SUBTITLES` depending on the source |
+| Spectrum visualiser following the audio | ✅ | `Controls/AudioVisualizer.cs`, `Services/Audio/WasapiAudioTap.cs` | Real analysis of the process's own output through WASAPI loopback, not a fake animation (§7.14) |
+| Switch the right-hand card between visualiser and lines | ✅ | `NowPlayingViewModel.ActiveView`, `OverlayTabStyle` | Default is the visualiser; the `LYRICS` chip stays visible but disabled when a track has no timed lines |
 | Click a lyric line to seek | ✅ | `Views/Overlays/NowPlayingView.xaml.cs` + `MainWindowViewModel` | |
 | Custom-drawn slider (seek + volume) | ✅ | `Controls/SlimSlider.cs` | Click, drag, hover thumb |
 | Play / pause | ✅ | `PlayerBarViewModel.TogglePlayback` → `LibVlcAudioPlayer` | Glyph follows `IsPlaying`, which follows the engine |
@@ -790,10 +872,36 @@ empty state that names the login restriction instead of blaming the video. Every
 a derived property on a view model, so the honest version cannot drift out of sync with the
 dishonest one.
 
+### 7.14 A custom-drawn control that animates must own its clock
+
+The visualiser looks like a styling exercise and is not. Three separate mechanisms have to line
+up, and each one failed on its own during development:
+
+- **The data is captured, not invented.** WASAPI process loopback gives real spectra, which is
+  why the bars react to a bass drop. A timer-driven pseudo-random walk would have been a tenth of
+  the code and would have looked *approximately* right in a screenshot — and completely wrong to
+  anyone actually listening, which is the only review that matters for a visualiser.
+- **The render loop is tied to playback, not to the control's lifetime.** `CompositionTarget.
+  Rendering` is subscribed while `IsPlaying` and the visualiser is visible, and unsubscribed
+  otherwise; a paused overlay therefore costs no frames. The alternative (an always-running
+  `DispatcherTimer` that calls `InvalidateVisual`) redraws a 32-bar spectrum forever in the
+  background.
+- **Selection lives in the view model, in exactly one place.** The card switch was first built
+  with `ToggleButton`s, whose `IsChecked` flipped locally when a click did not reach the command,
+  leaving both chips lit while the card did not change. A `Button` with a bool `Tag` plus a
+  string-valued `Trigger` failed too: a string `"True"` never equals a boxed `bool`, so the
+  selected chip never lit. The version that holds is a `RadioButton` per chip in one `GroupName`,
+  styled by `OverlayTabStyle` off `IsChecked="{Binding …, Mode=OneWay}"` — WPF's own checked state
+  is then a *projection* of `ActiveView`, and the only way to change the card is the command that
+  changes `ActiveView` (§4.3).
+
 ---
 
 ## 8. Known limitations
 
+- **The visualiser needs Windows 10 2004 or newer.** Process loopback capture was added in
+  10.0.19041; on older builds the card falls back to its idle wave and says nothing, because a
+  disabled-looking player is worse than a quiet one.
 - **Playback is one track at a time.** There is no queue: finishing a track stops at its end,
   and the left transport button restarts the current track instead of going back in history
   (§4.5). Shuffle, repeat and next need a queue before they can mean anything.
@@ -858,6 +966,12 @@ probes, resolves and raises `TrackResolved` with an ordinary `Track`.
 `MediaPlayer`) was replaced by `LibVlcAudioPlayer` exactly this way: one new class, one line in
 `App.xaml.cs`, no view and no view-model change. Any replacement only has to report
 `PositionChanged` with the engine's own playhead and never echo a position back as a seek.
+
+**Add a second visualiser style**
+`AudioVisualizer.OnRender` is the only place that knows the shape. `SpectrumAnalyzer` publishes
+band levels and a pulse; a bars/radial/waveform variant reads the same two and replaces the
+drawing. Keep the tap ownership and the `IsVisibleChanged` / `IsPlaying` gating intact — that is
+what keeps a hidden card free.
 
 **Load real lyrics**
 Implement `ILyricProvider` with an `.lrc` parser that produces `LyricLine` values and hand it to

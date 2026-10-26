@@ -64,6 +64,12 @@ public partial class NowPlayingViewModel : ObservableObject
     private Track _loadedTrack = Track.Empty;
 
     /// <summary>
+    /// View of the right-hand card: the visualiser by default, the line list on request.
+    /// </summary>
+    [ObservableProperty]
+    private OverlayView activeView = OverlayView.Visualizer;
+
+    /// <summary>
     /// True when the loaded track has at least one lyric line, which decides whether the
     /// list or the empty hint is shown.
     /// </summary>
@@ -119,6 +125,58 @@ public partial class NowPlayingViewModel : ObservableObject
         : "Reading an .lrc file next to the audio file is not implemented yet.";
 
     /// <summary>
+    /// True when the visualiser is the visible card, so the toggle knows which chip to mark.
+    /// </summary>
+    public bool IsVisualizerSelected => ActiveView == OverlayView.Visualizer;
+
+    /// <summary>
+    /// True when the line list is the visible card.
+    /// </summary>
+    public bool IsLyricsSelected => ActiveView == OverlayView.Lyrics;
+
+    /// <summary>
+    /// True when the empty state belongs on screen: the line list is the active card and it has
+    /// nothing in it.
+    /// </summary>
+    /// <remarks>
+    /// It is not enough to ask whether lines exist. The visualiser card fills the same cell, so an
+    /// "no lyrics" panel keyed only on <see cref="HasLyrics"/> would float over the spectrum.
+    /// </remarks>
+    public bool ShowsEmptyLyricState => IsLyricsSelected && !HasLyrics;
+
+    /// <summary>
+    /// True when the toggle can offer the line list, which is only worth a click when there is
+    /// something to read.
+    /// </summary>
+    /// <remarks>
+    /// The chip stays visible and disabled instead of disappearing: a control that comes and goes
+    /// as tracks change is harder to find than one that is always there and clearly unavailable.
+    /// </remarks>
+    public bool CanShowLyrics => HasLyrics;
+
+    /// <summary>
+    /// Switches the right-hand card to the visualiser.
+    /// </summary>
+    [RelayCommand]
+    private void ShowVisualizer() => ActiveView = OverlayView.Visualizer;
+
+    /// <summary>
+    /// Switches the right-hand card to the timed lines, when the track has any.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanShowLyrics))]
+    private void ShowLyrics() => ActiveView = OverlayView.Lyrics;
+
+    /// <summary>
+    /// Re-announces the derived selection flags after the view switch.
+    /// </summary>
+    partial void OnActiveViewChanged(OverlayView value)
+    {
+        OnPropertyChanged(nameof(IsVisualizerSelected));
+        OnPropertyChanged(nameof(IsLyricsSelected));
+        OnPropertyChanged(nameof(ShowsEmptyLyricState));
+    }
+
+    /// <summary>
     /// Rebuilds the lyric rows for a newly loaded track and resets the highlight.
     /// </summary>
     /// <param name="track">Track whose lyrics should be shown.</param>
@@ -133,7 +191,14 @@ public partial class NowPlayingViewModel : ObservableObject
             Lyrics.Add(new LyricLineViewModel(line));
         }
 
+        // A new track starts on the visualiser: the list is empty for most online tracks, and a
+        // card that opens on an empty state looks like the feature is broken.
+        ActiveView = OverlayView.Visualizer;
+
         OnPropertyChanged(nameof(HasLyrics));
+        OnPropertyChanged(nameof(ShowsEmptyLyricState));
+        OnPropertyChanged(nameof(CanShowLyrics));
+        ShowLyricsCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(SectionLabel));
         OnPropertyChanged(nameof(SourceNotice));
         OnPropertyChanged(nameof(HasSourceNotice));

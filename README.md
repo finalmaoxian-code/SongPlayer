@@ -55,20 +55,21 @@ SongPlayer/
 ├─ ViewModels/
 │  ├─ MainWindowViewModel.cs        Navigation state + mediator between the children
 │  ├─ Shell/PlayerBarViewModel.cs   Track metadata, transport, position (single source)
-│  ├─ Shell/NowPlayingViewModel.cs  Lyrics and the active-line index
+│  ├─ Shell/NowPlayingViewModel.cs  Active card (visualiser / lines), lyrics, active-line index
 │  ├─ Shell/BilibiliViewModel.cs    BV id input, bridge resolve, retry on an expired link
 │  ├─ Pages/LibraryPageViewModel.cs Import, persistence, track list, selection
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
-├─ Models/                  Track, PlayerPage, LyricLine, TimeSpanFormatting — plain data, no WPF
+├─ Models/                  Track, PlayerPage, LyricLine, OverlayView, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
 │  ├─ Artwork/              CoverImageLoader: downloads and decodes artwork off the UI thread
-│  ├─ Audio/                IAudioPlayer + LibVlcAudioPlayer (LibVLC engine, files and streams)
+│  ├─ Audio/                IAudioPlayer + LibVlcAudioPlayer, WasapiAudioTap + SpectrumAnalyzer
 │  ├─ Bilibili/             Bridge client, stream URL + metadata resolution, duration probe
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
 │  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
 │  └─ Lyrics/               ILyricProvider, TrackLyricProvider, CaptionStore, sample provider
 ├─ Controls/
-│  └─ SlimSlider.cs         Self-drawing seek / volume bar
+│  ├─ SlimSlider.cs         Self-drawing seek / volume bar
+│  └─ AudioVisualizer.cs    Hand-drawn spectrum bars fed by WASAPI loopback
 ├─ Interop/
 │  └─ WindowMaximizeHelper.cs  Keeps a maximized borderless window inside the work area
 └─ Converters/
@@ -134,6 +135,12 @@ SongPlayer/
   touches only the two rows that change. Clicking a line seeks to it, and the view's code-behind
   scrolls the active row into view. A real `.lrc` parser can replace `SampleLyricProvider`
   without any view changes.
+- **Borrowed metadata is labelled as borrowed.** A video's title, uploader, thumbnail and
+  subtitle track fill the same `Track` record a file does, but the presentation derives its
+  wording from the source: `Bilibili video · <uploader>` instead of artist, a source chip instead
+  of album chips, `SUBTITLES` instead of `LYRICS`, and an empty state that names the login
+  restriction. None of those labels can drift out of sync with the data, because all of them are
+  derived properties.
 - **The sliders are custom-drawn.** The stock WPF `Slider` chrome is heavy and its
   `Track`/repeat-button plumbing is awkward to restyle, so `Controls/SlimSlider.cs`
   paints its own track, filled portion and hover thumb while inheriting all behaviour
@@ -164,8 +171,17 @@ publishes most subtitle tracks to a signed-in session, so that list is usually e
 overlay says why. The bridge has to be running; the page says so when it is not, and local files
 keep working regardless. The signed URL is never persisted.
 
+The Now Playing overlay's right-hand card opens on a **live spectrum** of what SongPlayer is
+playing: NAudio's WASAPI process loopback records this process's own output, a 2048-point FFT
+splits it into 32 log-spaced bands, and the hand-drawn `AudioVisualizer` mirrors them around a
+centre seam. The `LYRICS` chip switches to the timed lines when the track has any; otherwise it
+stays visible but disabled. The capture starts and stops with visibility and playback, so a
+hidden or paused overlay costs nothing, and a machine that refuses the capture simply keeps the
+idle wave instead of failing the player.
+
 There is no queue yet: a track ends where it ends, and the left transport button restarts the
 current track rather than stepping back through history. `.lrc` parsing, embedded cover art for
 local files, search over the library, playlists, saving online tracks, and a queue with
-next/shuffle/repeat are the next milestones. Controls that are not yet implemented are visibly
+next/shuffle/repeat are the next milestones. A choice of visualiser style (bars, radial,
+waveform) is deliberately left as a swap of `AudioVisualizer.OnRender`. Controls that are not yet implemented are visibly
 disabled rather than silently inert.

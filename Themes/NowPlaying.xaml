@@ -68,6 +68,56 @@
         </Setter>
     </Style>
 
+    <!--
+        Segmented chip used by the overlay header to switch the right-hand card between the
+        visualiser and the timed lines. A ToggleButton rather than a RadioButton so the chip can
+        show the active option without a group name, and styled flat because the card header is
+        already dense.
+    -->
+    <!--
+        A pair of chips that switch the right-hand card. They are radio buttons so the visual
+        state comes from IsChecked, which WPF's trigger system compares as a real bool. A
+        ToggleButton plus a bool Tag looked equivalent and failed silently: a string trigger value
+        never equals a boxed bool, so the selected chip simply never lit up.
+    -->
+    <Style x:Key="OverlayTabStyle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border
+                        x:Name="Chip"
+                        Background="Transparent"
+                        BorderBrush="{StaticResource DividerBrush}"
+                        BorderThickness="1"
+                        CornerRadius="999"
+                        Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chip" Property="Background" Value="{StaticResource Surface3Brush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Chip" Property="Background" Value="{StaticResource AccentSoftBrush}" />
+                            <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.35" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Lyric list: no selection chrome, no scrollbar gutter, transparent background -->
     <Style x:Key="LyricListStyle" TargetType="ListBox">
         <Setter Property="Background" Value="Transparent" />
