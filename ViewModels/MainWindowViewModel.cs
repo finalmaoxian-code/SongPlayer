@@ -3,7 +3,10 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SongPlayer.Models;
 using SongPlayer.Services.Audio;
+using SongPlayer.Services.Library;
 using SongPlayer.Services.Lyrics;
+using SongPlayer.Services.Storage;
+using SongPlayer.ViewModels.Pages;
 using SongPlayer.ViewModels.Shell;
 
 namespace SongPlayer.ViewModels;
@@ -31,19 +34,39 @@ public partial class MainWindowViewModel : ObservableObject
     /// sensible. The composition root in <c>App</c> passes the real services instead.
     /// </remarks>
     public MainWindowViewModel()
-        : this(new SampleLyricProvider(), audioPlayer: null)
+        : this(
+            new SampleLyricProvider(),
+            CreateDesignTimeLibrary(),
+            new FolderPicker(),
+            audioPlayer: null)
     {
+    }
+
+    /// <summary>
+    /// Builds a library over the real services for the designer / bare-window path.
+    /// </summary>
+    private static IMusicLibraryService CreateDesignTimeLibrary()
+    {
+        var scanner = new AudioFileScanner();
+
+        return new MusicLibraryService(scanner, new TrackMetadataReader(scanner), new LibraryStore());
     }
 
     /// <summary>
     /// Creates the shell with the child view models wired to the given services.
     /// </summary>
     /// <param name="lyricProvider">Source of the timed lyrics shown on the Now Playing overlay.</param>
+    /// <param name="library">Library facade behind the Local Music page.</param>
+    /// <param name="folderPicker">Picker used by the import command.</param>
     /// <param name="audioPlayer">
     /// Engine that executes the transport commands, or <c>null</c> to keep the transport purely
     /// visual.
     /// </param>
-    public MainWindowViewModel(ILyricProvider lyricProvider, IAudioPlayer? audioPlayer = null)
+    public MainWindowViewModel(
+        ILyricProvider lyricProvider,
+        IMusicLibraryService library,
+        IFolderPicker folderPicker,
+        IAudioPlayer? audioPlayer = null)
     {
         PlayerBar = audioPlayer is null
             ? new PlayerBarViewModel()
@@ -52,8 +75,16 @@ public partial class MainWindowViewModel : ObservableObject
         NowPlaying = new NowPlayingViewModel(lyricProvider);
         NowPlaying.LoadFor(PlayerBar.CurrentTrack);
 
+        Library = new LibraryPageViewModel(library, folderPicker);
+        Library.TrackActivated += OnLibraryTrackActivated;
+
         PlayerBar.PropertyChanged += OnPlayerBarPropertyChanged;
     }
+
+    /// <summary>
+    /// Tracks imported into the local library, shown by the Local Music page.
+    /// </summary>
+    public LibraryPageViewModel Library { get; }
 
     /// <summary>
     /// Transport state of the bottom bar. Also the source of truth for the overlay, which shows
@@ -148,6 +179,22 @@ public partial class MainWindowViewModel : ObservableObject
     private void ShowLibrary() => CurrentPage = PlayerPage.Library;
 
     /// <summary>
+    /// Runs the folder import and then shows the result.
+    /// </summary>
+    /// <remarks>
+    /// The import belongs to the library page, but the Home page and the sidebar offer the same
+    /// action. Rather than duplicating the scan logic, they call this command, which delegates
+    /// and navigates to where the outcome is visible.
+    /// </remarks>
+    [RelayCommand]
+    private async Task ImportFolderAsync()
+    {
+        await Library.ImportFolderCommand.ExecuteAsync(null);
+
+        CurrentPage = PlayerPage.Library;
+    }
+
+    /// <summary>
     /// Opens the immersive Now Playing overlay. The current page is left untouched, so
     /// closing the overlay lands back on exactly the page the user came from.
     /// </summary>
@@ -200,6 +247,20 @@ public partial class MainWindowViewModel : ObservableObject
                 OpenNowPlayingCommand.NotifyCanExecuteChanged();
                 break;
         }
+    }
+
+    /// <summary>
+    /// Loads a track picked on the Local Music page into the player bar.
+    /// </summary>
+    /// <remarks>
+    /// The library page does not know the player bar exists; it raises an event and the mediator
+    /// decides what it means. Selecting a row only loads the track (position reset, lyrics rebuilt,
+    /// transport enabled) — starting playback stays an explicit action on the transport button.
+    /// </remarks>
+    private void OnLibraryTrackActivated(object? sender, Track track)
+    {
+        PlayerBar.LoadTrack(track);
+        CurrentPage = PlayerPage.Library;
     }
 
     /// <summary>

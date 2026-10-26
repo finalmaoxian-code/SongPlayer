@@ -44,23 +44,27 @@ SongPlayer/
 │  ├─ Buttons.xaml          Icon, play, artwork, secondary and caption buttons
 │  ├─ Inputs.xaml           Search box
 │  ├─ Navigation.xaml       Sidebar nav item
-│  └─ NowPlaying.xaml       Artwork frame, lyric rows, chips
+│  ├─ NowPlaying.xaml       Artwork frame, lyric rows, chips
+│  └─ Library.xaml          Track table: headers, row states, cell styles
 ├─ ViewModels/
 │  ├─ MainWindowViewModel.cs        Navigation state + mediator between the children
 │  ├─ Shell/PlayerBarViewModel.cs   Track metadata, transport, position (single source)
 │  ├─ Shell/NowPlayingViewModel.cs  Lyrics and the active-line index
+│  ├─ Pages/LibraryPageViewModel.cs Import, persistence, track list, selection
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
-├─ Models/                  Track, PlayerPage, LyricLine — plain data, no WPF
+├─ Models/                  Track, PlayerPage, LyricLine, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
 │  ├─ Audio/                IAudioPlayer + SilentAudioPlayer (placeholder engine)
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
+│  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
 │  └─ Lyrics/               ILyricProvider + sample provider
 ├─ Controls/
 │  └─ SlimSlider.cs         Self-drawing seek / volume bar
 ├─ Interop/
 │  └─ WindowMaximizeHelper.cs  Keeps a maximized borderless window inside the work area
 └─ Converters/
-   └─ BoolToVisibilityConverter.cs  Boolean to Visibility (and inverted) conversion
+   ├─ BoolToVisibilityConverter.cs  Boolean to Visibility (and inverted) conversion
+   └─ InverseBoolConverter.cs       Boolean negation, for IsEnabled bindings
 ```
 
 ## Architecture notes
@@ -70,16 +74,16 @@ SongPlayer/
   buttons and the lyric scrolling live next to the views that own them
   (`Views/CaptionChrome.cs`, `Views/Overlays/NowPlayingView.xaml.cs`). All state is in the view
   models and is exposed with `CommunityToolkit.Mvvm` source generators.
-- **One DataContext, two child view models.** The window is bound to `MainWindowViewModel`,
-  which composes `PlayerBar` and `NowPlaying`; views bind through them
-  (`{Binding PlayerBar.TrackTitle}`). Neither child references the other — the shell forwards
-  the only two shared signals (position, current track) in one method, so the graph stays
-  acyclic and the position has exactly one source.
+- **One DataContext, three child view models.** The window is bound to `MainWindowViewModel`,
+  which composes `PlayerBar`, `NowPlaying` and `Library`; views bind through them
+  (`{Binding PlayerBar.TrackTitle}`). No child references another — the shell owns the two
+  edges (position and current track into the overlay, a library selection into the player
+  bar), so the graph stays acyclic and the position has exactly one source.
 - **Services are injected, not constructed by UI code.** `App.xaml.cs` is the only place that
   names concrete types: it builds the scanner/tag-reader/store facade, an `IAudioPlayer` and an
-  `ILyricProvider`, then hands them to the shell. No DI container — six objects with one
-  lifetime do not justify one. Swapping the silent player for a real engine is a single line
-  there.
+  `ILyricProvider` and a folder picker, then hands them to the shell. No DI container — a
+  handful of objects with one lifetime do not justify one. Swapping the silent player for a
+  real engine is a single line there.
 - **Design tokens first.** Colors, brushes, corner radii and font sizes are declared
   once in `Themes/Colors.xaml`. Views reference tokens rather than literal values, so
   retheming means editing one file. The style dictionaries are split by concern rather than
@@ -110,9 +114,14 @@ SongPlayer/
 
 ## Status
 
-This is an early preview. The shell, theming, player bar and the immersive Now Playing
-overlay are in place, and the library backend (file scanning, tag reading, JSON persistence)
-exists behind interfaces — it is not yet surfaced in the UI, and playback is still the silent
-`IAudioPlayer` placeholder. Real audio output, a populated Local Music page and real
-artwork/`.lrc` loading are the next milestones. Controls that are not yet implemented are
-visibly disabled rather than silently inert.
+Import works end to end: **Import folder** picks a directory, recursively scans it for
+`.mp3`/`.flac`/`.wav`/`.m4a`, reads title/artist/duration/album/track number through
+TagLibSharp, de-duplicates by path and writes the index to `%LOCALAPPDATA%\SongPlayer` so the
+Local Music page is populated the next time you start the app. Clicking (or arrow-keying to)
+a row loads it into the player bar.
+
+Playback itself is still the silent `IAudioPlayer` placeholder, so `IsPlaying` is a flag and
+the position only moves when you seek or click a lyric line — the karaoke highlight follows
+that one property, so a real engine needs no view changes. `.lrc` parsing, cover art, search
+over the library, playlists and shuffle/repeat are the next milestones. Controls that are not
+yet implemented are visibly disabled rather than silently inert.

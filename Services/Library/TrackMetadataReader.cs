@@ -48,7 +48,21 @@ public sealed class TrackMetadataReader : ITrackMetadataReader
 
             TimeSpan duration = audio.Properties?.Duration ?? TimeSpan.Zero;
 
-            return new Track(title, artist, duration, fullPath);
+            // Album and track number are optional tags: a loose single usually carries neither,
+            // so they stay null and the view model substitutes its own neutral labels.
+            string? album = string.IsNullOrWhiteSpace(audio.Tag.Album)
+                ? null
+                : audio.Tag.Album.Trim();
+
+            uint trackNumber = audio.Tag.Track;
+
+            return new Track(
+                title,
+                artist,
+                duration,
+                fullPath,
+                album,
+                trackNumber > 0 ? (int)trackNumber : null);
         }
         catch (Exception ex)
             when (ex

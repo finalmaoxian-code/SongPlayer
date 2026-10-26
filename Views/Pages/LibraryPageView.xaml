@@ -18,22 +18,131 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <TextBlock
-                Text="0 tracks · 0 albums"
-                Foreground="{StaticResource TextSecondaryBrush}"
-                FontSize="{StaticResource FontSizeCaption}"
-                VerticalAlignment="Center" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock
+                    Text="{Binding Library.LibrarySummary}"
+                    Foreground="{StaticResource TextSecondaryBrush}"
+                    FontSize="{StaticResource FontSizeCaption}" />
+                <TextBlock
+                    Margin="0,3,0,0"
+                    Text="{Binding Library.StatusMessage}"
+                    Foreground="{StaticResource TextTertiaryBrush}"
+                    FontSize="{StaticResource FontSizeCaption}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
 
-            <Button
+            <StackPanel
                 Grid.Column="1"
-                Content="Import folder"
-                IsEnabled="False"
-                Style="{StaticResource SecondaryButtonStyle}"
-                ToolTip="Folder import is coming in the next milestone" />
+                Orientation="Horizontal"
+                VerticalAlignment="Center">
+                <Button
+                    Margin="0,0,8,0"
+                    Content="Clear library"
+                    Command="{Binding Library.ClearLibraryCommand}"
+                    Visibility="{Binding Library.HasTracks, Converter={StaticResource BoolToVisibility}}"
+                    Style="{StaticResource SecondaryButtonStyle}" />
+                <Button
+                    Content="Import folder"
+                    Command="{Binding Library.ImportFolderCommand}"
+                    IsEnabled="{Binding Library.IsBusy, Converter={StaticResource InverseBoolToBoolean}}"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    ToolTip="Pick a folder and index every supported audio file in it" />
+            </StackPanel>
         </Grid>
 
+        <!-- Track table -->
+        <Border
+            Grid.Row="1"
+            Margin="0,0,0,4"
+            Visibility="{Binding Library.HasTracks, Converter={StaticResource BoolToVisibility}}"
+            Style="{StaticResource CardStyle}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Column headers -->
+                <Grid Margin="16,12,16,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="34" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="#" Style="{StaticResource ColumnHeaderStyle}" />
+                    <TextBlock
+                        Grid.Column="1"
+                        Text="TITLE"
+                        Style="{StaticResource ColumnHeaderStyle}" />
+                    <TextBlock
+                        Grid.Column="2"
+                        Text="ALBUM"
+                        Style="{StaticResource ColumnHeaderStyle}" />
+                    <TextBlock
+                        Grid.Column="3"
+                        MinWidth="54"
+                        Text="TIME"
+                        TextAlignment="Right"
+                        Style="{StaticResource ColumnHeaderStyle}" />
+                </Grid>
+
+                <Border Grid.Row="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" />
+
+                <ListBox
+                    x:Name="TrackList"
+                    Grid.Row="1"
+                    ItemsSource="{Binding Library.Tracks}"
+                    SelectionChanged="TrackList_SelectionChanged"
+                    Style="{StaticResource TrackListStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="34" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Text="&#xE8D6;" Style="{StaticResource TrackIndexGlyphStyle}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Text="{Binding Title}"
+                                    Style="{StaticResource TrackTitleCellStyle}" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Text="{Binding AlbumText}"
+                                    Style="{StaticResource TrackAlbumCellStyle}"
+                                    ToolTip="{Binding AlbumText}" />
+                                <TextBlock
+                                    Grid.Column="3"
+                                    MinWidth="54"
+                                    Text="{Binding DurationText}"
+                                    Style="{StaticResource TrackDurationCellStyle}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+
+                    <!--
+                        Row selection is what loads a track (see the code-behind): it fires for
+                        mouse clicks as well as for keyboard navigation, so the list needs no
+                        separate click handler.
+                    -->
+                    <ListBox.ItemContainerStyle>
+                        <Style BasedOn="{StaticResource TrackRowStyle}" TargetType="ListBoxItem" />
+                    </ListBox.ItemContainerStyle>
+                </ListBox>
+            </Grid>
+        </Border>
+
         <!-- Empty library state -->
-        <Border Grid.Row="1" Margin="0,0,0,4" Style="{StaticResource CardStyle}">
+        <Border
+            Grid.Row="1"
+            Margin="0,0,0,4"
+            Visibility="{Binding Library.HasNoTracks, Converter={StaticResource BoolToVisibility}}"
+            Style="{StaticResource CardStyle}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Border
                     Width="72"
@@ -61,14 +170,14 @@
                     MaxWidth="400"
                     HorizontalAlignment="Center"
                     TextAlignment="Center"
-                    Text="Point SongPlayer at a folder and it will index your audio files. The import pipeline is the next milestone."
+                    Text="Point SongPlayer at a folder and it will index your audio files. Nothing is copied or moved — the library only remembers where your files live."
                     Style="{StaticResource BodyTextStyle}" />
 
                 <Button
                     Content="Import folder"
-                    IsEnabled="False"
-                    Style="{StaticResource SecondaryButtonStyle}"
-                    ToolTip="Folder import is coming in the next milestone" />
+                    Command="{Binding Library.ImportFolderCommand}"
+                    IsEnabled="{Binding Library.IsBusy, Converter={StaticResource InverseBoolToBoolean}}"
+                    Style="{StaticResource SecondaryButtonStyle}" />
             </StackPanel>
         </Border>
     </Grid>

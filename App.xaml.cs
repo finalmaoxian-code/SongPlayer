@@ -1,6 +1,8 @@
 using System.Windows;
 using SongPlayer.Services.Audio;
+using SongPlayer.Services.Library;
 using SongPlayer.Services.Lyrics;
+using SongPlayer.Services.Storage;
 using SongPlayer.ViewModels;
 
 namespace SongPlayer;
@@ -18,23 +20,29 @@ namespace SongPlayer;
 public partial class App : Application
 {
     /// <summary>
-    /// Builds the object graph and shows the shell window.
+    /// Builds the object graph, shows the shell window and restores the saved library.
     /// </summary>
     /// <param name="e">Start-up arguments.</param>
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
+        // The shared scanner is passed to both the metadata reader and the library service so the
+        // supported-format list has exactly one instance behind it.
+        var scanner = new AudioFileScanner();
+        var metadataReader = new TrackMetadataReader(scanner);
+        IMusicLibraryService library = new MusicLibraryService(scanner, metadataReader, new LibraryStore());
+        IFolderPicker folderPicker = new FolderPicker();
         IAudioPlayer audioPlayer = new SilentAudioPlayer();
         ILyricProvider lyricProvider = new SampleLyricProvider();
 
-        // The library services (IMusicLibraryService over AudioFileScanner,
-        // TrackMetadataReader and LibraryStore) are constructed here as well once the Library
-        // page owns a collection to fill; today the shell shows a single track, so instantiating
-        // them would only create a graph nobody consumes.
-        MainWindowViewModel viewModel = new(lyricProvider, audioPlayer);
+        MainWindowViewModel viewModel = new(lyricProvider, library, folderPicker, audioPlayer);
 
         MainWindow = new MainWindow { DataContext = viewModel };
         MainWindow.Show();
+
+        // Restored after the window is up so a slow or empty library never delays start-up and
+        // the list fills in visibly instead of the window appearing late.
+        await viewModel.Library.RestoreAsync();
     }
 }

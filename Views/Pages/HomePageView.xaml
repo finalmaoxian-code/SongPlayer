@@ -44,9 +44,9 @@
                             <Button
                                 Margin="10,0,0,0"
                                 Content="Import folder"
-                                IsEnabled="False"
+                                Command="{Binding ImportFolderCommand}"
                                 Style="{StaticResource SecondaryButtonStyle}"
-                                ToolTip="Folder import is coming in the next milestone" />
+                                ToolTip="Pick a folder and index every supported audio file in it" />
                         </StackPanel>
                     </StackPanel>
 
@@ -96,7 +96,7 @@
                         <TextBlock Margin="0,14,0,0" Text="Local Music" Style="{StaticResource TitleTextStyle}" />
                         <TextBlock
                             Margin="0,6,0,0"
-                            Text="0 tracks imported"
+                            Text="{Binding Library.LibrarySummary}"
                             Style="{StaticResource CaptionTextStyle}" />
                     </StackPanel>
                 </Border>
@@ -151,7 +151,11 @@
             </UniformGrid>
 
             <!-- Empty state -->
-            <Border Margin="0,16,0,4" Padding="24,20" Style="{StaticResource CardStyle}">
+            <Border
+                Margin="0,16,0,4"
+                Padding="24,20"
+                Style="{StaticResource CardStyle}"
+                Visibility="{Binding Library.HasNoTracks, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Border
                         Width="44"
@@ -171,7 +175,7 @@
                         <TextBlock Text="Your library is empty" Style="{StaticResource TitleTextStyle}" />
                         <TextBlock
                             Margin="0,5,0,0"
-                            Text="Songs you import will appear here. Library scanning lands in the next milestone."
+                            Text="Songs you import will appear here, and the player remembers them the next time you open SongPlayer."
                             Style="{StaticResource BodyTextStyle}" />
                     </StackPanel>
                 </StackPanel>

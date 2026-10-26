@@ -77,15 +77,17 @@ public partial class PlayerBarViewModel : ObservableObject
     public string TrackArtist => CurrentTrack.Artist;
 
     /// <summary>
-    /// Album name shown under the artwork. Falls back to a neutral label for loose files
-    /// that carry no album tag.
+    /// Album tag of the loaded track. Falls back to a neutral label for loose files that carry
+    /// no album tag.
     /// </summary>
-    public string TrackAlbum => HasTrack ? "Night Roads" : "No album";
+    public string TrackAlbum =>
+        !string.IsNullOrWhiteSpace(CurrentTrack.Album) ? CurrentTrack.Album! : "No album";
 
     /// <summary>
     /// Track position inside its album, formatted the way music players show it.
     /// </summary>
-    public string TrackAlbumPosition => HasTrack ? "Track 04" : "—";
+    public string TrackAlbumPosition =>
+        CurrentTrack.TrackNumber is { } number ? $"Track {number:D2}" : "—";
 
     /// <summary>
     /// Glyph of the procedural artwork placeholder. Real cover art will replace this once
@@ -117,6 +119,39 @@ public partial class PlayerBarViewModel : ObservableObject
     /// Tooltip text of the play/pause button.
     /// </summary>
     public string PlayPauseTooltip => IsPlaying ? "Pause" : "Play";
+
+    /// <summary>
+    /// Loads a track without starting it.
+    /// </summary>
+    /// <param name="track">Track to load.</param>
+    /// <remarks>
+    /// The position is reset before the track changes, so the seek slider never spans the old and
+    /// the new duration for one frame. Lyrics follow through the mediator, which reacts to
+    /// <see cref="CurrentTrack"/>.
+    /// </remarks>
+    public void LoadTrack(Track track)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+
+        IsPlaying = false;
+        PositionSeconds = 0;
+        CurrentTrack = track;
+
+        _audioPlayer?.Stop();
+    }
+
+    /// <summary>
+    /// Loads a track and starts it from the beginning.
+    /// </summary>
+    /// <param name="track">Track to play.</param>
+    public void PlayTrack(Track track)
+    {
+        LoadTrack(track);
+
+        IsPlaying = true;
+
+        _audioPlayer?.Play(track, TimeSpan.Zero);
+    }
 
     /// <summary>
     /// Toggles the playback state and forwards the resulting instruction to the audio engine.
@@ -177,8 +212,5 @@ public partial class PlayerBarViewModel : ObservableObject
     /// <summary>
     /// Formats a duration as <c>m:ss</c> or <c>h:mm:ss</c> for long tracks.
     /// </summary>
-    private static string FormatTime(TimeSpan value) =>
-        value.TotalHours >= 1
-            ? $"{(int)value.TotalHours}:{value.Minutes:D2}:{value.Seconds:D2}"
-            : $"{value.Minutes:D2}:{value.Seconds:D2}";
+    private static string FormatTime(TimeSpan value) => TimeSpanFormatting.ToClock(value);
 }

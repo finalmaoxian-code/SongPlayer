@@ -21,6 +21,7 @@
                 <ResourceDictionary Source="Themes/Inputs.xaml" />
                 <ResourceDictionary Source="Themes/Navigation.xaml" />
                 <ResourceDictionary Source="Themes/NowPlaying.xaml" />
+                <ResourceDictionary Source="Themes/Library.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <!-- Shared value converters -->
@@ -28,6 +29,7 @@
             <converters:BoolToVisibilityConverter
                 x:Key="InverseBoolToVisibility"
                 Invert="True" />
+            <converters:InverseBoolConverter x:Key="InverseBoolToBoolean" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>
