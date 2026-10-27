@@ -1,6 +1,7 @@
 using System;
+using System.Diagnostics;
+using System.Globalization;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using SongPlayer.Services.Audio;
@@ -16,13 +17,16 @@ namespace SongPlayer.Controls;
 /// <para>
 /// The control owns its audio tap instead of receiving one through a binding. Capture costs a
 /// WASAPI stream and a thread, and the view is the only thing that knows whether the visualiser
-/// is on screen: opening the overlay starts it, closing it stops it, and pausing fades it out.
-/// Handing the tap to a view model would move that lifecycle into object lifetime rules that
-/// have nothing to do with drawing.
+/// is on screen. Opening the overlay, switching back from lyrics, or resuming playback all ask
+/// the same coordinator to start; hiding or unloading asks it to stop. The tap is disposed on
+/// unload and created again on the next load, so a detach cannot permanently kill the control.
 /// </para>
 /// <para>
-/// Rendering is frame-driven through <see cref="CompositionTarget.Rendering"/> only while the
-/// control is visible and something is playing, so a paused overlay costs no CPU at all.
+/// One clock runs at a time. While the control is loaded, visible and playing,
+/// <see cref="CompositionTarget.Rendering"/> advances the drawn bars. While it is loaded and
+/// visible but paused, a 33 ms timer keeps the idle wave moving. Hidden or unloaded, neither
+/// runs and capture is stopped. The clock always measures real elapsed time, including when
+/// playback is on but the capture has gone quiet — invalidating alone would freeze the wave.
 /// </para>
 /// </remarks>
 public sealed class AudioVisualizer : FrameworkElement
@@ -38,9 +42,6 @@ public sealed class AudioVisualizer : FrameworkElement
 
     /// <summary>Bars below this height are dropped so silence draws nothing, not a dotted line.</summary>
     private const double MinBarHeight = 2;
-
-    /// <summary>How quickly the idle wave moves, in radians per second.</summary>
-    private const double IdleSpeed = 1.1;
 
     private static readonly DependencyProperty AccentBrushProperty = DependencyProperty.Register(
         nameof(AccentBrush),
@@ -66,36 +67,36 @@ public sealed class AudioVisualizer : FrameworkElement
         nameof(IsPlaying),
         typeof(bool),
         typeof(AudioVisualizer),
-        new FrameworkPropertyMetadata(
-            false,
-            FrameworkPropertyMetadataOptions.None,
-            OnIsPlayingChanged
-        )
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.None, OnIsPlayingChanged)
     );
 
     private readonly DispatcherTimer _idleTimer;
+    private readonly SpectrumDisplay _display = new();
 
     private WasapiAudioTap? _tap;
-    private bool _isRendering;
-    private double _idlePhase;
+    private string? _fault;
+    private string? _lastReconcile;
+    private long _clockStamp;
+    private bool _loaded;
+    private bool _rendering;
+    private bool _idleClock;
 
     /// <summary>Creates the visualiser and its idle animation timer.</summary>
     public AudioVisualizer()
     {
         SnapsToDevicePixels = true;
 
-        // The idle wave is animated by a timer rather than by the composition clock so it stops
-        // the instant the overlay closes, instead of leaving a registered handler behind.
         _idleTimer = new DispatcherTimer(DispatcherPriority.Render)
         {
             Interval = TimeSpan.FromMilliseconds(33),
         };
 
-        _idleTimer.Tick += OnIdleTick;
-
-        // The overlay is collapsed rather than removed, so this control never sees a visual-parent
-        // change when it appears: its ancestors only flip Visibility. Watching IsVisible is the
-        // only notification that arrives in that case, and without it capture would never start.
+        // The overlay and the lyrics card are collapsed rather than removed, so a visual-parent
+        // change is not what tells this control it appeared. IsVisibleChanged is. Loaded and
+        // Unloaded still matter: unload has to release the device, and a later load has to be
+        // willing to create a new one.
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
         IsVisibleChanged += OnIsVisibleChanged;
     }
 
@@ -114,8 +115,8 @@ public sealed class AudioVisualizer : FrameworkElement
     }
 
     /// <summary>
-    /// True while the transport is playing. Drives the capture lifecycle: starting capture on
-    /// true, releasing it on false.
+    /// True while the transport is playing. Combined with visibility to decide whether the
+    /// spectrum should be captured.
     /// </summary>
     public bool IsPlaying
     {
@@ -136,46 +137,38 @@ public sealed class AudioVisualizer : FrameworkElement
             return;
         }
 
-        var analyzer = _tap?.Analyzer;
-
-        if (analyzer is null || analyzer.IsSilent)
+        if (_display.ShowIdle)
         {
             DrawIdle(drawingContext, width, height);
+
+            if (IsPlaying && !string.IsNullOrWhiteSpace(_fault))
+            {
+                DrawFault(drawingContext, width, height);
+            }
+
             return;
         }
 
-        DrawBars(drawingContext, analyzer, width, height);
+        DrawBars(drawingContext, width, height);
     }
 
     /// <inheritdoc />
     protected override void OnVisualParentChanged(DependencyObject oldParent)
     {
         base.OnVisualParentChanged(oldParent);
-
-        if (oldParent is null)
-        {
-            // Becoming visible again: re-evaluate capture, since IsVisible notifications are
-            // unreliable for elements inside a collapsed overlay.
-            UpdateCaptureState();
-        }
-        else if (!IsVisible)
-        {
-            StopCapture();
-        }
+        Reconcile();
     }
 
-    /// <summary>
-    /// Draws the mirrored spectrum. Each bar is a rounded rectangle centred on the seam, with its
-    /// height taken from the corresponding band and its colour fading towards the edges.
-    /// </summary>
-    private void DrawBars(
-        DrawingContext context,
-        SpectrumAnalyzer analyzer,
-        double width,
-        double height
-    )
+    /// <inheritdoc />
+    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
-        var levels = analyzer.BandLevels;
+        base.OnRenderSizeChanged(sizeInfo);
+        InvalidateVisual();
+    }
+
+    private void DrawBars(DrawingContext context, double width, double height)
+    {
+        var levels = _display.Levels;
         var slot = width / BarCount;
         var barWidth = Math.Max(2, slot - BarGap);
         var half = (height - SeamHeight) / 2;
@@ -183,10 +176,8 @@ public sealed class AudioVisualizer : FrameworkElement
 
         for (var i = 0; i < BarCount; i++)
         {
-            var level = Math.Clamp(levels[i], 0f, 1f);
-
-            // A gentle curve keeps quiet detail visible without letting loud passages jump.
-            var magnitude = Math.Pow(level, 0.85);
+            var level = i < levels.Length ? levels[i] : 0f;
+            var magnitude = Math.Pow(Math.Clamp(level, 0f, 1f), 0.85);
             var barHeight = magnitude * half;
 
             if (barHeight < MinBarHeight)
@@ -204,7 +195,6 @@ public sealed class AudioVisualizer : FrameworkElement
                 radius,
                 radius
             );
-
             context.DrawRoundedRectangle(
                 brush,
                 null,
@@ -214,39 +204,33 @@ public sealed class AudioVisualizer : FrameworkElement
             );
         }
 
-        // The seam glows with overall loudness, which is what makes the shape feel like it is
-        // breathing with the track rather than twitching per frequency.
-        var pulse = Math.Clamp(analyzer.PulseLevel, 0, 1);
+        var pulse = Math.Clamp(_display.Pulse, 0, 1);
 
         if (pulse > 0.01)
         {
-            var glow = new Rect(
-                0,
-                half + (SeamHeight / 2) - (pulse * 6),
-                width,
-                Math.Max(2, pulse * 12)
+            var glowBrush = new SolidColorBrush(
+                Color.FromArgb((byte)(40 + (pulse * 90)), 167, 139, 250)
             );
+            glowBrush.Freeze();
             context.DrawRectangle(
-                new SolidColorBrush(Color.FromArgb((byte)(40 + (pulse * 90)), 167, 139, 250)),
+                glowBrush,
                 null,
-                glow
+                new Rect(0, half + (SeamHeight / 2) - (pulse * 6), width, Math.Max(2, pulse * 12))
             );
         }
     }
 
-    /// <summary>
-    /// Draws the idle state: a flat, slowly travelling wave that says "paused", not "broken".
-    /// </summary>
     private void DrawIdle(DrawingContext context, double width, double height)
     {
         var slot = width / BarCount;
         var barWidth = Math.Max(2, slot - BarGap);
         var half = (height - SeamHeight) / 2;
         var brush = IdleBrush;
+        var phase = _display.IdlePhase;
 
         for (var i = 0; i < BarCount; i++)
         {
-            var wave = 0.5 + (0.5 * Math.Sin(_idlePhase + (i * 0.35)));
+            var wave = 0.5 + (0.5 * Math.Sin(phase + (i * 0.35)));
             var barHeight = Math.Max(MinBarHeight, wave * half * 0.16);
             var x = (i * slot) + (BarGap / 2);
             var radius = Math.Min(barWidth / 2, 3);
@@ -258,7 +242,6 @@ public sealed class AudioVisualizer : FrameworkElement
                 radius,
                 radius
             );
-
             context.DrawRoundedRectangle(
                 brush,
                 null,
@@ -269,79 +252,298 @@ public sealed class AudioVisualizer : FrameworkElement
         }
     }
 
+    private void DrawFault(DrawingContext context, double width, double height)
+    {
+        var text = _fault ?? string.Empty;
+
+        if (text.Length > 96)
+        {
+            text = text[..96];
+        }
+
+        var formatted = new FormattedText(
+            text,
+            CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            new Typeface("Segoe UI"),
+            11,
+            IdleBrush,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip
+        );
+
+        if (formatted.Width > width - 16)
+        {
+            formatted.MaxTextWidth = Math.Max(0, width - 16);
+            formatted.MaxLineCount = 1;
+        }
+
+        context.DrawText(formatted, new Point(8, Math.Max(0, height - formatted.Height - 4)));
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        _loaded = true;
+        AudioDiagnostics.Event($"visualizer loaded visible={IsVisible} playing={IsPlaying}");
+        Reconcile();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        _loaded = false;
+        AudioDiagnostics.Event($"visualizer unloaded visible={IsVisible} playing={IsPlaying}");
+        Reconcile();
+    }
+
     private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        UpdateCaptureState();
+        AudioDiagnostics.Event($"visualizer visible={IsVisible} playing={IsPlaying} loaded={_loaded}");
+        Reconcile();
     }
 
     private static void OnIsPlayingChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         var visualizer = (AudioVisualizer)d;
-        visualizer.UpdateCaptureState();
+        AudioDiagnostics.Event(
+            $"visualizer playing={visualizer.IsPlaying} visible={visualizer.IsVisible} loaded={visualizer._loaded}"
+        );
+        visualizer.Reconcile();
     }
 
-    private void UpdateCaptureState()
+    /// <summary>
+    /// Applies the one rule the control has: capture only while loaded, visible and playing;
+    /// animate only while loaded and visible; release the device on unload.
+    /// </summary>
+    private void Reconcile()
     {
-        if (IsPlaying && IsVisible)
+        if (!_loaded)
         {
-            StartCapture();
+            DetachClock();
+            ReleaseTap();
+            LogReconcile("unloaded");
+            return;
+        }
+
+        var visible = IsVisible;
+        var capture = visible && IsPlaying;
+
+        if (!visible || !IsPlaying)
+        {
+            _fault = null;
+            ToolTip = null;
+        }
+
+        if (capture)
+        {
+            EnsureCapture();
         }
         else
         {
-            StopCapture();
+            _tap?.Stop();
         }
+
+        if (!visible)
+        {
+            DetachClock();
+        }
+        else if (IsPlaying)
+        {
+            UseRenderClock();
+        }
+        else
+        {
+            UseIdleClock();
+        }
+
+        LogReconcile(capture ? "capture" : visible ? "visible-idle" : "hidden");
+        InvalidateVisual();
     }
 
-    private void StartCapture()
+    private void EnsureCapture()
     {
-        _tap ??= new WasapiAudioTap(new SpectrumAnalyzer(44100, 2));
-        _tap.Start();
+        if (_tap is null)
+        {
+            _tap = new WasapiAudioTap(new SpectrumAnalyzer(44100, 2));
+            _tap.Faulted += OnTapFaulted;
+        }
 
-        if (_isRendering)
+        _tap.Start();
+    }
+
+    private void ReleaseTap()
+    {
+        if (_tap is null)
         {
             return;
         }
 
-        _isRendering = true;
-        _idleTimer.Stop();
-        CompositionTarget.Rendering += OnCompositionRendering;
+        _tap.Faulted -= OnTapFaulted;
+        _tap.Dispose();
+        _tap = null;
     }
 
-    private void StopCapture()
+    private void UseRenderClock()
     {
-        if (_isRendering)
-        {
-            CompositionTarget.Rendering -= OnCompositionRendering;
-            _isRendering = false;
-        }
-
-        _tap?.Stop();
-
-        // One idle tick keeps the wave alive while the overlay is open and paused.
-        if (IsVisible)
-        {
-            _idleTimer.Start();
-        }
-        else
+        if (_idleClock)
         {
             _idleTimer.Stop();
+            _idleTimer.Tick -= OnClockTick;
+            _idleClock = false;
+            _clockStamp = 0;
         }
 
+        if (_rendering)
+        {
+            return;
+        }
+
+        _rendering = true;
+        _clockStamp = 0;
+        CompositionTarget.Rendering += OnClockTick;
+        AudioDiagnostics.Event("rendering subscribed");
+    }
+
+    private void UseIdleClock()
+    {
+        if (_rendering)
+        {
+            CompositionTarget.Rendering -= OnClockTick;
+            _rendering = false;
+            _clockStamp = 0;
+            AudioDiagnostics.Event("rendering unsubscribed");
+        }
+
+        if (_idleClock)
+        {
+            return;
+        }
+
+        _idleClock = true;
+        _clockStamp = 0;
+
+        // Subscribed here rather than in the constructor: a timer that outlives the control
+        // keeps it alive, and this control is created and dropped once per overlay open.
+        _idleTimer.Tick -= OnClockTick;
+        _idleTimer.Tick += OnClockTick;
+        _idleTimer.Start();
+        AudioDiagnostics.Event("idle clock started");
+    }
+
+    private void DetachClock()
+    {
+        if (_rendering)
+        {
+            CompositionTarget.Rendering -= OnClockTick;
+            _rendering = false;
+            AudioDiagnostics.Event("rendering unsubscribed");
+        }
+
+        if (_idleClock)
+        {
+            _idleTimer.Stop();
+            _idleTimer.Tick -= OnClockTick;
+            _idleClock = false;
+            AudioDiagnostics.Event("idle clock stopped");
+        }
+
+        _clockStamp = 0;
+    }
+
+    private void OnClockTick(object? sender, EventArgs e) => AdvanceClock();
+
+    private void AdvanceClock()
+    {
+        var now = Stopwatch.GetTimestamp();
+        var dt = _clockStamp == 0 ? 0.016 : Stopwatch.GetElapsedTime(_clockStamp, now).TotalSeconds;
+        _clockStamp = now;
+
+        var tap = _tap;
+        var frame = tap?.CurrentFrame ?? SpectrumFrame.Silent;
+        var ageMs = -1d;
+        var fresh = false;
+
+        if (tap is not null && frame.Timestamp != 0)
+        {
+            ageMs = Stopwatch.GetElapsedTime(frame.Timestamp, now).TotalMilliseconds;
+            fresh =
+                IsPlaying
+                && tap.IsRunning
+                && ageMs <= SpectrumDisplay.FreshWindowSeconds * 1000d;
+        }
+
+        if (
+            !fresh
+            && tap is { IsRunning: false, State: AudioCaptureState.Stopped, LastFailure: { Length: > 0 } reason }
+        )
+        {
+            _fault = reason;
+            ToolTip = reason;
+        }
+        else if (fresh)
+        {
+            _fault = null;
+            ToolTip = null;
+        }
+
+        _display.Advance(frame, fresh, dt);
+
+        if (AudioDiagnostics.IsEnabled)
+        {
+            AudioDiagnostics.View(
+                $"loaded={_loaded} visible={IsVisible} playing={IsPlaying} rendering={_rendering} "
+                    + $"idleClock={_idleClock} tap={tap?.State.ToString() ?? "none"} "
+                    + $"desired={tap?.IsDesiredRunning.ToString() ?? "false"}"
+            );
+        }
+
+        AudioDiagnostics.Render(ageMs);
+        AudioDiagnostics.Summary();
         InvalidateVisual();
     }
 
-    private void OnCompositionRendering(object? sender, EventArgs e) => InvalidateVisual();
-
-    private void OnIdleTick(object? sender, EventArgs e)
+    private void OnTapFaulted(object? sender, string message)
     {
-        _idlePhase += 0.06;
+        if (!Dispatcher.CheckAccess())
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(() => OnTapFaulted(sender, message));
+            }
+            catch (InvalidOperationException)
+            {
+                // The dispatcher is gone; the control is already leaving the tree.
+            }
+
+            return;
+        }
+
+        if (!IsPlaying)
+        {
+            return;
+        }
+
+        _fault = message;
+        ToolTip = message;
         InvalidateVisual();
     }
 
-    /// <inheritdoc />
-    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
+    private void LogReconcile(string mode)
     {
-        base.OnRenderSizeChanged(sizeInfo);
-        InvalidateVisual();
+        var line =
+            $"{mode} loaded={_loaded} visible={IsVisible} playing={IsPlaying} "
+            + $"rendering={_rendering} idleClock={_idleClock} tap={_tap?.State.ToString() ?? "none"} "
+            + $"desired={_tap?.IsDesiredRunning.ToString() ?? "false"}";
+
+        if (line == _lastReconcile)
+        {
+            return;
+        }
+
+        _lastReconcile = line;
+        AudioDiagnostics.Event("visualizer " + line);
+
+        if (AudioDiagnostics.IsEnabled)
+        {
+            AudioDiagnostics.View(line);
+        }
     }
 }

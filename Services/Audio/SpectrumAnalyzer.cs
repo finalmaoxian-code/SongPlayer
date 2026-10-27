@@ -120,6 +120,10 @@ public sealed class SpectrumAnalyzer
     /// <summary>
     /// Latest band levels, each in 0..1, ordered from bass to treble. Index 0 is ~40 Hz.
     /// </summary>
+    /// <remarks>
+    /// This is the analyser's live array, mutated in place by the capture thread. Reading it from
+    /// anywhere else is a race; use <see cref="BuildFrame"/> to get a consistent copy instead.
+    /// </remarks>
     public ReadOnlySpan<float> BandLevels => _levels;
 
     /// <summary>
@@ -138,6 +142,25 @@ public sealed class SpectrumAnalyzer
     /// view switch to an idle animation instead of drawing empty bars.
     /// </summary>
     public bool IsSilent { get; private set; } = true;
+
+    /// <summary>
+    /// Monotonic counter raised every time new bar heights are published. A consumer compares it
+    /// with the sequence of the last frame it rendered to tell 'no new audio yet' apart from
+    /// 'the bars happen to look the same'.
+    /// </summary>
+    public long Sequence { get; private set; }
+
+    /// <summary>
+    /// Copies the current bar heights into an immutable frame stamped with a monotonic
+    /// timestamp.
+    /// </summary>
+    /// <remarks>
+    /// The capture callback is the only caller of <see cref="Process"/>, <see cref="Decay"/> and
+    /// this method. The UI never touches the analyser: it keeps the frame this returns, which
+    /// shares no mutable state with the arrays above.
+    /// </remarks>
+    public SpectrumFrame BuildFrame() =>
+        SpectrumFrame.Capture(_levels, Sequence, PulseLevel, IsSilent);
 
     /// <summary>
     /// Feeds one interleaved audio buffer into the analyser and recomputes the band levels.
@@ -233,6 +256,8 @@ public sealed class SpectrumAnalyzer
             _levelValues[i] += (_peaks[i] - _levelValues[i]) * Smoothing;
             _levels[i] = (float)Math.Clamp(_levelValues[i], 0, 1);
         }
+
+        Sequence++;
     }
 
     private void Analyse(double elapsedSeconds)
