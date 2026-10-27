@@ -25,13 +25,20 @@ namespace SongPlayer.Services.Library;
 /// <param name="Artist">Last known uploader of an online track.</param>
 /// <param name="DurationSeconds">Last known length of an online track, in seconds.</param>
 /// <param name="CoverUri">Last known artwork address of an online track.</param>
+/// <param name="SearchClue">
+/// Words the user typed to find this track, when it came from a search. Kept so that a lyric lookup
+/// after a restart still has the same clue it had the first time. It is a lookup hint and never
+/// overwrites <paramref name="Title"/> or <paramref name="Artist"/>, because a search term is not a
+/// confirmed song identity and the library still has to show the real video title and uploader.
+/// </param>
 public sealed record LibraryEntry(
     string? FilePath,
     string? StreamKey,
     string? Title,
     string? Artist,
     int? DurationSeconds,
-    string? CoverUri)
+    string? CoverUri,
+    string? SearchClue = null)
 {
     /// <summary>
     /// Captures a track for storage.
@@ -56,7 +63,8 @@ public sealed record LibraryEntry(
                 track.Title,
                 track.Artist,
                 (int)Math.Round(track.Duration.TotalSeconds),
-                track.CoverUri);
+                track.CoverUri,
+                string.IsNullOrWhiteSpace(track.SearchClue) ? null : track.SearchClue);
         }
 
         return null;
@@ -78,7 +86,8 @@ public sealed record LibraryEntry(
             string.IsNullOrWhiteSpace(Artist) ? "Bilibili" : Artist!,
             duration > 0 ? TimeSpan.FromSeconds(duration) : TimeSpan.Zero,
             StreamKey: StreamKey,
-            CoverUri: CoverUri);
+            CoverUri: CoverUri,
+            SearchClue: string.IsNullOrWhiteSpace(SearchClue) ? null : SearchClue);
     }
 
     /// <summary>

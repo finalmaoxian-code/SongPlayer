@@ -1,7 +1,7 @@
 namespace SongPlayer.Services.Bilibili;
 
 /// <summary>
-/// One timed subtitle line that the bridge extracted from a video.
+/// One timed subtitle line extracted from a video's public subtitle track.
 /// </summary>
 /// <param name="Seconds">Start of the line, in seconds from the beginning of the video.</param>
 /// <param name="Text">The subtitle text itself.</param>

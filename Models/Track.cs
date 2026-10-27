@@ -36,6 +36,13 @@ namespace SongPlayer.Models;
 /// For an online source this is the video thumbnail, which is a reasonable stand-in for cover
 /// art but is not the album cover; for a local file nothing sets it yet.
 /// </param>
+/// <param name="SearchClue">
+/// The words the user typed to find this track, when it came from a search. This is a clue for
+/// lyric matching, not an identity: a search for "creep radiohead" may well have led to a live
+/// cover, so it must never override what the track itself says. It is kept separate from
+/// <paramref name="Title"/> and <paramref name="Artist"/> precisely so that cleaning it up for a
+/// query can never change what the library and the player bar display.
+/// </param>
 public sealed record Track(
     string Title,
     string Artist,
@@ -45,7 +52,8 @@ public sealed record Track(
     int? TrackNumber = null,
     string? StreamKey = null,
     string? StreamUri = null,
-    string? CoverUri = null)
+    string? CoverUri = null,
+    string? SearchClue = null)
 {
     /// <summary>
     /// True when the track can be handed to the audio engine, either as a file on disk or as an

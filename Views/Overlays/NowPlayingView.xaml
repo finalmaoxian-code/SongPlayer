@@ -322,19 +322,86 @@
                                 Margin="8,0,0,0"
                                 Content="{Binding NowPlaying.SectionLabel}"
                                 IsChecked="{Binding NowPlaying.IsLyricsSelected, Mode=OneWay}"
-                                IsEnabled="{Binding NowPlaying.CanShowLyrics}"
                                 Command="{Binding NowPlaying.ShowLyricsCommand}"
                                 Style="{StaticResource OverlayTabStyle}"
-                                ToolTip="Timed lines for this track, when it has any" />
+                                ToolTip="Lyrics for this track, looked up automatically" />
                         </StackPanel>
 
-                        <TextBlock
+                        <!--
+                            Offset nudges. A fixed offset can only correct a constant lead or lag,
+                            which is the one timing error a listener can actually perceive and fix by
+                            ear; a different arrangement or a speed change needs other lyrics instead.
+                            The value is printed next to the buttons so the current correction is
+                            never guessed at.
+                        -->
+                        <StackPanel
                             Grid.Column="1"
+                            Orientation="Horizontal"
                             HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
                             Margin="0,0,12,0"
-                            Text="Click a line to jump"
-                            Style="{StaticResource CaptionTextStyle}"
-                            Visibility="{Binding NowPlaying.IsLyricsSelected, Converter={StaticResource BoolToVisibility}}" />
+                            Visibility="{Binding NowPlaying.IsLyricsSelected, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Margin="0,0,6,0"
+                                Text="{Binding NowPlaying.LyricOffsetText}"
+                                Style="{StaticResource CaptionTextStyle}"
+                                Foreground="{StaticResource TextTertiaryBrush}"
+                                ToolTip="Playback time minus this value is the lyric time." />
+                            <Button
+                                Content="-0.5 s"
+                                Command="{Binding NowPlaying.OffsetEarlierCommand}"
+                                Style="{StaticResource InlineChipButtonStyle}"
+                                ToolTip="Show the lyrics this much earlier" />
+                            <Button
+                                Content="+0.5 s"
+                                Margin="4,0,0,0"
+                                Command="{Binding NowPlaying.OffsetLaterCommand}"
+                                Style="{StaticResource InlineChipButtonStyle}"
+                                ToolTip="Show the lyrics this much later" />
+                            <Button
+                                Content="Reset"
+                                Margin="4,0,0,0"
+                                Command="{Binding NowPlaying.ResetOffsetCommand}"
+                                Style="{StaticResource InlineChipButtonStyle}"
+                                Visibility="{Binding NowPlaying.HasLyricOffset, Converter={StaticResource BoolToVisibility}}"
+                                ToolTip="Drop the offset back to zero" />
+                        </StackPanel>
+
+                        <StackPanel
+                            Grid.Column="2"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+                            <!--
+                                Why this record was chosen, or what the lookup is doing.
+                                The header is shared by both cards on purpose: a lookup that is
+                                still running (or that failed) has to be visible from the
+                                spectrum too, otherwise the lyric chip looks broken.
+                            -->
+                            <TextBlock
+                                Margin="0,0,12,0"
+                                VerticalAlignment="Center"
+                                MaxWidth="280"
+                                TextTrimming="CharacterEllipsis"
+                                Text="{Binding NowPlaying.MatchExplanation}"
+                                Style="{StaticResource CaptionTextStyle}"
+                                Foreground="{StaticResource TextTertiaryBrush}"
+                                Visibility="{Binding NowPlaying.HasMatchExplanation, Converter={StaticResource BoolToVisibility}}"
+                                ToolTip="{Binding NowPlaying.MatchExplanation}" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Text="{Binding NowPlaying.QueryStatus}"
+                                Style="{StaticResource CaptionTextStyle}"
+                                Foreground="{StaticResource TextTertiaryBrush}"
+                                Visibility="{Binding NowPlaying.HasQueryStatus, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock
+                                Margin="12,0,0,0"
+                                VerticalAlignment="Center"
+                                Text="Click a line to jump"
+                                Style="{StaticResource CaptionTextStyle}"
+                                Visibility="{Binding NowPlaying.ShowsLyricList, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
                     </Grid>
 
                     <!-- The live spectrum: what the track is doing right now -->
@@ -356,9 +423,10 @@
                     </Grid>
 
                     <!--
-                        The list is bound to the lyric rows; the active line carries
-                        IsActive, which the item style turns into the accent highlight.
-                        Clicking a row seeks through SeekToLyricCommand.
+                        Three faces of the lyric card, all in the same cell: the timed list, the
+                        plain-text block for records without timing, and the candidate picker for a
+                        lookup the matcher would not decide on its own. The state panel below covers
+                        everything else, including loading and failure.
                     -->
                     <Grid
                         Grid.Row="1"
@@ -373,7 +441,7 @@
                             Grid.Row="0"
                             ItemsSource="{Binding NowPlaying.Lyrics}"
                             Style="{StaticResource LyricListStyle}"
-                            Visibility="{Binding NowPlaying.HasLyrics, Converter={StaticResource BoolToVisibility}}">
+                            Visibility="{Binding NowPlaying.ShowsLyricList, Converter={StaticResource BoolToVisibility}}">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <!-- The item template only renders text; padding and
@@ -393,10 +461,88 @@
                             </ListBox.ItemContainerStyle>
                         </ListBox>
 
+                        <!--
+                            Untimed lyrics: the words are readable, but nothing is highlighted and
+                            nothing is clickable, because inventing timestamps would be a lie about
+                            when the singer sings.
+                        -->
+                        <ScrollViewer
+                            Grid.Row="0"
+                            Margin="6,0,6,0"
+                            VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled"
+                            Visibility="{Binding NowPlaying.ShowsPlainLyrics, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock
+                                Text="{Binding NowPlaying.PlainText}"
+                                TextWrapping="Wrap"
+                                LineHeight="24"
+                                Foreground="{StaticResource TextSecondaryBrush}"
+                                FontSize="14" />
+                        </ScrollViewer>
+
+                        <!--
+                            The matcher could not decide, so the user decides. Each row carries
+                            enough detail to tell a live take from the studio cut, and the score is
+                            shown so the ordering is explainable instead of magic.
+                        -->
+                        <ListBox
+                            Grid.Row="0"
+                            Margin="6,0,6,0"
+                            ItemsSource="{Binding NowPlaying.Candidates}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                            Visibility="{Binding NowPlaying.ShowsCandidateList, Converter={StaticResource BoolToVisibility}}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border
+                                        Margin="0,3"
+                                        Padding="12,9"
+                                        CornerRadius="{StaticResource SmallCornerRadius}"
+                                        Background="{StaticResource Surface2Brush}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock
+                                                    Text="{Binding Title}"
+                                                    FontSize="14"
+                                                    FontWeight="SemiBold"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Margin="0,2,0,0"
+                                                    Text="{Binding Artist}"
+                                                    Style="{StaticResource CaptionTextStyle}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Margin="0,1,0,0"
+                                                    Text="{Binding Detail}"
+                                                    Foreground="{StaticResource TextTertiaryBrush}"
+                                                    FontSize="11"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <Button
+                                                Grid.Column="1"
+                                                Margin="12,0,0,0"
+                                                VerticalAlignment="Center"
+                                                Content="Use"
+                                                Height="28"
+                                                Padding="14,0"
+                                                FontSize="12"
+                                                Command="{Binding SelectCommand}"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                ToolTip="Use these lyrics for this track from now on" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
                     <!--
-                        Provenance footer. Subtitles are timed by the uploader or by a speech
-                        model, so the overlay says so instead of implying the song's own words
-                        line up with the highlight.
+                        Provenance footer. The wording follows the source that actually answered, so
+                        a Bilibili video with real LRCLIB lyrics is never labelled as video subtitles.
                     -->
                     <TextBlock
                         Grid.Row="1"
@@ -409,8 +555,10 @@
                     </Grid>
 
                     <!--
-                        Shown for tracks that carry no lyric data yet. It has to be hidden on the
-                        visualiser card as well, otherwise the hint floats over the spectrum.
+                        Shown whenever the lyric card has nothing readable: loading, not found,
+                        instrumental, network failure or a plain-text record with no timing. It has to
+                        be hidden on the visualiser card as well, otherwise the panel floats over the
+                        spectrum.
                     -->
                     <StackPanel
                         Grid.Row="1"
@@ -443,7 +591,40 @@
                             TextAlignment="Center"
                             Text="{Binding NowPlaying.EmptyHint}"
                             Style="{StaticResource BodyTextStyle}" />
+
+                        <!--
+                            Asking again is the only action a failure state needs, and it is also
+                            what the user needs after correcting a wrong automatic match. It never
+                            touches playback.
+                        -->
+                        <Button
+                            Margin="0,16,0,0"
+                            HorizontalAlignment="Center"
+                            Content="Search again"
+                            Command="{Binding NowPlaying.RetryCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Visibility="{Binding NowPlaying.CanRetry, Converter={StaticResource BoolToVisibility}}"
+                            ToolTip="Ignore the cache and ask the lyric database again" />
                     </StackPanel>
+
+                    <!--
+                        Correction control for a match that turned out wrong. It is offered next to
+                        the lyrics instead of hiding in a menu, because the moment the mistake is
+                        noticed is the moment the fix should be one click away.
+                    -->
+                    <Button
+                        Grid.Row="1"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,8,8"
+                        Content="Change lyrics"
+                        Height="28"
+                        Padding="12,0"
+                        FontSize="12"
+                        Command="{Binding NowPlaying.RetryCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Visibility="{Binding NowPlaying.CanChangeLyrics, Converter={StaticResource BoolToVisibility}}"
+                        ToolTip="Look the track up again and forget the earlier choice" />
                 </Grid>
             </Border>
         </Grid>

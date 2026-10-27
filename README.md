@@ -11,8 +11,9 @@ cover art and the lyric sheet, and closing it returns you to the page you came f
 
 - .NET 10 SDK (or the runtime matching the `TargetFramework` in `SongPlayer.csproj`)
 - Windows 10 version 1809 or later
-- For online playback only: Node.js and the sibling `SongPlayer.SourceLab` project, started
-  with `node bridge.cjs` (it listens on `127.0.0.1:39271`). Local files need nothing extra.
+- An internet connection for online playback. Bilibili's public web API is called directly from
+  this process, so no helper server, Node.js or extra install is involved. Local files need no
+  network at all.
 
 The build pins `RuntimeIdentifier=win-x64` because LibVLC ships one native build per
 architecture. Leave the solution platform on **Any CPU** — the identifier already produces an
@@ -56,17 +57,17 @@ SongPlayer/
 │  ├─ MainWindowViewModel.cs        Navigation state + mediator between the children
 │  ├─ Shell/PlayerBarViewModel.cs   Track metadata, transport, position (single source)
 │  ├─ Shell/NowPlayingViewModel.cs  Active card (visualiser / lines), lyrics, active-line index
-│  ├─ Shell/BilibiliViewModel.cs    Online search candidates, bridge resolve, retry on an expired link
+│  ├─ Shell/BilibiliViewModel.cs    Online search candidates, stream resolve, retry on an expired link
 │  ├─ Pages/LibraryPageViewModel.cs Import, persistence, track list, selection
 │  └─ LyricLineViewModel.cs         A lyric row with its own highlight flag
 ├─ Models/                  Track, PlayerPage, LyricLine, OverlayView, TimeSpanFormatting — plain data, no WPF
 ├─ Services/
 │  ├─ Artwork/              CoverImageLoader: downloads and decodes artwork off the UI thread
 │  ├─ Audio/                IAudioPlayer + LibVlcAudioPlayer, WasapiAudioTap + SpectrumAnalyzer
-│  ├─ Bilibili/             Bridge client, search candidates, stream URL + metadata resolution, duration probe
+│  ├─ Bilibili/             Direct Bilibili API client (WBI signing), search candidates, stream URL + metadata resolution, duration probe
 │  ├─ Library/              Scanner, tag reader, JSON store, facade over all three
 │  ├─ Storage/              IFolderPicker + the Win32 folder dialog behind it
-│  └─ Lyrics/               ILyricProvider, TrackLyricProvider, CaptionStore, sample provider
+│  └─ Lyrics/               ILyricProvider + TrackLyricProvider, LRCLIB client, matcher, LRC parser, cache, CaptionStore
 ├─ Controls/
 │  ├─ SlimSlider.cs         Self-drawing seek / volume bar
 │  └─ AudioVisualizer.cs    Hand-drawn spectrum bars fed by WASAPI loopback
@@ -166,20 +167,20 @@ and **Play BV…** goes straight to it. The search path is a picker rather than 
 on purpose: a query for a song returns the official video next to 4K remasters, hour-long
 compilations and videos that merely mention the words, so the app lists the candidates with their
 uploader and length and lets the listener choose. Selecting one resolves it exactly as a pasted
-id does — SongPlayer asks the local Node bridge (`127.0.0.1:39271`, from the sibling
-`SongPlayer.SourceLab` project) for the DASH audio URL, reads the real duration out of the
-stream's `sidx` box, and plays it through the same engine and the same transport. The video's title, uploader and thumbnail come back with
+id does — SongPlayer signs a request to Bilibili's own web API for the DASH audio URL, reads the
+real duration out of the stream's `sidx` box, and plays it through the same engine and the same
+transport. The video's title, uploader and thumbnail come back with
 it: the player bar and the Now Playing overlay show the real cover, and the metadata is labelled
 as a video's rather than a song's. A resolved video is remembered by its BV id, so the row is
 still in the library after a restart — with its cached title, uploader, length and thumbnail, but
 without a URL. Selecting such a row resolves the stream again before loading it, which is one
 network round trip the user only pays for tracks they actually pick. Any subtitle track the
-bridge could read is archived under `%LOCALAPPDATA%\SongPlayer\captions` and replayed through the
+client could read is archived under `%LOCALAPPDATA%\SongPlayer\captions` and replayed through the
 same karaoke list — Bilibili only publishes most subtitle tracks to a signed-in session, so that
-list is usually empty and the overlay says why. The bridge has to be running; the page says so
-when it is not, and local files keep working regardless. The signed URL is never persisted.
-Bilibili rate-limits burst searches; when it does, the page reports the refusal the bridge sent
-back instead of claiming the bridge is down.
+list is usually empty and the overlay says why. A failed resolve is reported as a sentence and
+local files keep working regardless. The signed URL is never persisted.
+Bilibili rate-limits burst searches; when it does, the page says it is rate-limiting instead of
+claiming the network is down.
 
 The Now Playing overlay's right-hand card opens on a **live spectrum** of what SongPlayer is
 playing: NAudio's WASAPI process loopback records this process's own output, a 2048-point FFT

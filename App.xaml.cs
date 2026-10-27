@@ -35,14 +35,23 @@ public partial class App : Application
         IMusicLibraryService library = new MusicLibraryService(scanner, metadataReader, new LibraryStore());
         IFolderPicker folderPicker = new FolderPicker();
         IConfirmationPrompt confirmation = new ConfirmationPrompt();
-        IBilibiliSource bilibiliSource = new BilibiliBridgeClient();
+        // Bilibili is called directly: its public web API answers from this process, so there is no
+        // helper to start and no second executable to ship.
+        IBilibiliSource bilibiliSource = new BilibiliClient();
         LibVlcAudioPlayer audioPlayer = new();
 
-        // Online subtitles are archived on disk and preferred over the fallback provider, so a
-        // track that played once with captions keeps them even after the bridge stops returning
-        // them (the player endpoint hides subtitles for some videos when nobody is logged in).
+        // Lyrics are fetched from LRCLIB directly rather than from Bilibili: a lyric database has
+        // nothing to do with a video source. The caption store is still passed along so archived
+        // online subtitles remain a separate, clearly labelled fallback when LRCLIB has nothing.
         var captionStore = new CaptionStore();
-        ILyricProvider lyricProvider = new TrackLyricProvider(captionStore, new SampleLyricProvider());
+        var lyricCache = new LyricCacheStore();
+        ILrclibClient lrclibClient = new LrclibClient();
+        ILyricProvider lyricProvider = new TrackLyricProvider(
+            lrclibClient,
+            new LyricMatcher(),
+            lyricCache,
+            new SongIdentityResolver(),
+            captionStore);
 
         _audioPlayer = audioPlayer;
 
@@ -54,6 +63,8 @@ public partial class App : Application
             bilibiliSource,
             captionStore,
             audioPlayer);
+
+        _viewModel = viewModel;
 
         MainWindow = new MainWindow { DataContext = viewModel };
         MainWindow.Show();
@@ -68,16 +79,25 @@ public partial class App : Application
     /// </summary>
     /// <remarks>
     /// LibVLC holds an audio output device open for as long as the engine exists, which would
-    /// outlive the window if nothing disposed it.
+    /// outlive the window if nothing disposed it. A lyric lookup still waiting on the network is
+    /// cancelled first so its continuation cannot touch a shell that is already gone.
     /// </remarks>
     /// <param name="e">Exit arguments.</param>
     protected override void OnExit(ExitEventArgs e)
     {
+        _viewModel?.Shutdown();
+        _viewModel = null;
+
         _audioPlayer?.Dispose();
         _audioPlayer = null;
 
         base.OnExit(e);
     }
+
+    /// <summary>
+    /// Shell kept for shutdown so pending work can be cancelled.
+    /// </summary>
+    private MainWindowViewModel? _viewModel;
 
     /// <summary>
     /// Engine instance kept for shutdown; the view models only ever see the interface.

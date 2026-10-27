@@ -1,7 +1,7 @@
 namespace SongPlayer.Services.Bilibili;
 
 /// <summary>
-/// Everything the bridge knows about a video: the playable audio URL plus the metadata the
+/// Everything Bilibili reports about a video: the playable audio URL plus the metadata its
 /// Bilibili video-info endpoint returns.
 /// </summary>
 /// <param name="Bvid">Video id that was resolved.</param>
@@ -15,14 +15,14 @@ namespace SongPlayer.Services.Bilibili;
 /// re-upload channel or an ordinary user.
 /// </param>
 /// <param name="CoverUri">
-/// Video thumbnail URL, or <see langword="null"/> when the bridge could not read one. Useful as
+/// Video thumbnail URL, or <see langword="null"/> when it could not be read. Useful as
 /// artwork, but it is a video thumbnail rather than an album cover.
 /// </param>
 /// <param name="Description">Video description, kept for reference and not shown as lyrics.</param>
 /// <param name="Duration">
-/// Video length reported by the metadata endpoint, or <see cref="TimeSpan.Zero"/> when the bridge
-/// could not read it. Preferred over probing the audio segment, which only knows the length of the
-/// stream it happened to download.
+/// Video length reported by the metadata endpoint, or <see cref="TimeSpan.Zero"/> when it could not be
+/// read. Preferred over probing the audio segment, which only knows the length of the stream it
+/// happened to download.
 /// </param>
 /// <param name="Captions">
 /// Timed subtitles that were publicly readable, in playback order. Empty is the common case and

@@ -15,6 +15,8 @@
       configuration it cannot launch.
     -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- The test project lives beside the app. The SDK would otherwise compile its sources into the executable. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);SongPlayer.Tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +25,15 @@
     <PackageReference Include="NAudio" Version="3.3.0" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="SongPlayer.Tests/**" />
+    <None Remove="SongPlayer.Tests/**" />
+    <Content Remove="SongPlayer.Tests/**" />
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>SongPlayer.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>

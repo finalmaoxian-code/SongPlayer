@@ -9,7 +9,7 @@ using SongPlayer.Services.Lyrics;
 namespace SongPlayer.ViewModels.Shell;
 
 /// <summary>
-/// Bilibili input in the Local Music toolbar: takes a video id, asks the local bridge for the
+/// Bilibili input in the Local Music toolbar: takes a video id, asks Bilibili's web API for the
 /// audio stream and hands the result to the player bar.
 /// </summary>
 /// <remarks>
@@ -36,7 +36,7 @@ public partial class BilibiliViewModel : ObservableObject
     /// <summary>
     /// Creates the input.
     /// </summary>
-    /// <param name="source">Bridge client that resolves ids into audio URLs.</param>
+    /// <param name="source">Online source that resolves ids into audio URLs.</param>
     /// <param name="captions">Archive the readable subtitles are stored in.</param>
     public BilibiliViewModel(IBilibiliSource source, CaptionStore captions)
     {
@@ -146,13 +146,6 @@ public partial class BilibiliViewModel : ObservableObject
 
         try
         {
-            if (!await _source.ProbeAsync())
-            {
-                throw new BilibiliSourceException(
-                    "The local bridge is not running. Start it with “node bridge.cjs” and try again."
-                );
-            }
-
             IReadOnlyList<BilibiliSearchResult> found = await _source.SearchAsync(
                 query,
                 SearchLimit
@@ -199,10 +192,16 @@ public partial class BilibiliViewModel : ObservableObject
             return;
         }
 
+        // The keyword is about to be replaced by the id, so it is captured first. It matters later:
+        // when the upload's title turns out to be too noisy to identify the song, the words the user
+        // searched for are the best remaining clue. It stays a clue, never a confirmed identity, so it
+        // is carried alongside the track rather than overwriting its title or uploader.
+        string clue = SearchText.Trim();
+
         // Reuses the id path rather than a second resolve: the row already carries the id, and only
         // the resolution step differs from typing it by hand.
         SearchText = candidate.Bvid;
-        await PlayAsync();
+        await PlayAsync(VideoId.IsValid(clue) ? null : clue);
     }
 
     /// <summary>
@@ -228,8 +227,12 @@ public partial class BilibiliViewModel : ObservableObject
     /// <summary>
     /// Resolves the typed id and starts playing it.
     /// </summary>
+    /// <param name="searchClue">
+    /// Words the user searched for, when this came from a candidate row. Typing an id leaves it empty,
+    /// which is correct: an id says nothing about the song and the video title has to carry the lookup.
+    /// </param>
     [RelayCommand]
-    private async Task PlayAsync()
+    private async Task PlayAsync(string? searchClue = null)
     {
         string candidate = SearchText.Trim();
 
@@ -245,11 +248,11 @@ public partial class BilibiliViewModel : ObservableObject
 
         IsBusy = true;
         HasError = false;
-        StatusMessage = "Asking the bridge for the audio stream…";
+        StatusMessage = "Asking Bilibili for the audio stream…";
 
         try
         {
-            Track track = await ResolveTrackAsync(candidate);
+            Track track = await ResolveTrackAsync(candidate, searchClue);
 
             StatusMessage = $"Playing {track.Title}.";
 
@@ -286,7 +289,9 @@ public partial class BilibiliViewModel : ObservableObject
 
         try
         {
-            Track refreshed = await ResolveTrackAsync(bvid);
+            // A refresh keeps whatever clue the track already carried; the user is not searching for
+            // anything new, they are only re-signing an expired URL.
+            Track refreshed = await ResolveTrackAsync(bvid, track.SearchClue);
 
             StatusMessage = $"Reloaded {refreshed.Title} after the link expired.";
             HasError = false;
@@ -308,17 +313,11 @@ public partial class BilibiliViewModel : ObservableObject
     /// Resolves <paramref name="bvid"/> into a playable stream track.
     /// </summary>
     /// <param name="bvid">Video id to resolve.</param>
+    /// <param name="searchClue">Words the user searched for, kept for lyric matching.</param>
     /// <returns>A track carrying the video title, uploader, thumbnail and length.</returns>
-    /// <exception cref="BilibiliSourceException">The bridge is missing, the id is wrong, or the CDN refused.</exception>
-    private async Task<Track> ResolveTrackAsync(string bvid)
+    /// <exception cref="BilibiliSourceException">The id is wrong, the video is unavailable, or Bilibili is unreachable.</exception>
+    private async Task<Track> ResolveTrackAsync(string bvid, string? searchClue = null)
     {
-        if (!await _source.ProbeAsync())
-        {
-            throw new BilibiliSourceException(
-                "The local bridge is not running. Start it with “node bridge.cjs” and try again."
-            );
-        }
-
         ResolvedMedia media = await _source.ResolveAsync(bvid);
 
         string streamKey = $"bilibili:{media.Bvid}";
@@ -341,7 +340,7 @@ public partial class BilibiliViewModel : ObservableObject
 
         // Title and uploader are shown as they are: a video title is not a song title and the
         // uploader is not necessarily the artist, so the UI labels them with a source chip rather
-        // than pretending they are tags.
+        // than pretending they are tags. The search clue travels alongside for lyric matching only.
         return new Track(
             media.Title,
             media.Uploader,
@@ -349,7 +348,8 @@ public partial class BilibiliViewModel : ObservableObject
             Album: null,
             StreamKey: streamKey,
             StreamUri: media.AudioUri.AbsoluteUri,
-            CoverUri: media.CoverUri?.AbsoluteUri
+            CoverUri: media.CoverUri?.AbsoluteUri,
+            SearchClue: string.IsNullOrWhiteSpace(searchClue) ? null : searchClue
         );
     }
 }

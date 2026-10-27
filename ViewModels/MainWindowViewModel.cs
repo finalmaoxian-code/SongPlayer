@@ -36,11 +36,11 @@ public partial class MainWindowViewModel : ObservableObject
     /// </remarks>
     public MainWindowViewModel()
         : this(
-            new TrackLyricProvider(new CaptionStore(), new SampleLyricProvider()),
+            new DesignTimeLyricProvider(),
             CreateDesignTimeLibrary(),
             new FolderPicker(),
             new ConfirmationPrompt(),
-            new BilibiliBridgeClient(),
+            new BilibiliClient(),
             new CaptionStore(),
             audioPlayer: null)
     {
@@ -63,7 +63,7 @@ public partial class MainWindowViewModel : ObservableObject
     /// <param name="library">Library facade behind the Local Music page.</param>
     /// <param name="folderPicker">Picker used by the import command.</param>
     /// <param name="confirmation">Prompt raised before the library is cleared.</param>
-    /// <param name="bilibiliSource">Bridge client behind the Bilibili input.</param>
+    /// <param name="bilibiliSource">Online source behind the Bilibili input.</param>
     /// <param name="captionStore">
     /// Archive shared by the Bilibili input, which writes the subtitles it reads, and the lyric
     /// provider, which reads them back. One instance so a resolve is visible to the overlay
@@ -235,6 +235,11 @@ public partial class MainWindowViewModel : ObservableObject
     /// Jumps to the moment a lyric line starts, so clicking a line seeks the track.
     /// </summary>
     /// <param name="line">Row that was clicked.</param>
+    /// <remarks>
+    /// The target goes through the overlay's offset, which is the inverse of the rule used to
+    /// highlight lines. Seeking to <c>line.Time</c> directly would land half a second off whenever the
+    /// user has nudged the timeline, and the line they clicked would not light up.
+    /// </remarks>
     [RelayCommand]
     private void SeekToLyric(LyricLineViewModel? line)
     {
@@ -243,8 +248,17 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        PlayerBar.PositionSeconds = line.Time.TotalSeconds;
+        PlayerBar.PositionSeconds = NowPlaying.PlaybackPositionFor(line).TotalSeconds;
     }
+
+    /// <summary>
+    /// Cancels a lyric lookup still in flight and releases it.
+    /// </summary>
+    /// <remarks>
+    /// Called when the window closes. Without it a lookup that is still waiting on the network keeps a
+    /// continuation alive after the shell is gone.
+    /// </remarks>
+    public void Shutdown() => NowPlaying.CancelPendingLookup();
 
     /// <summary>
     /// The overlay can only be opened once a track is loaded.
@@ -289,18 +303,27 @@ public partial class MainWindowViewModel : ObservableObject
     /// </remarks>
     private async void OnLibraryTrackActivated(object? sender, Track track)
     {
-        if (track.IsStream && !track.IsPlayable)
+        try
         {
-            Track? refreshed = await Bilibili.TryRefreshAsync(track);
+            if (track.IsStream && !track.IsPlayable)
+            {
+                Track? refreshed = await Bilibili.TryRefreshAsync(track);
 
-            PlayerBar.LoadTrack(refreshed ?? track);
+                PlayerBar.LoadTrack(refreshed ?? track);
+            }
+            else
+            {
+                PlayerBar.LoadTrack(track);
+            }
+
+            CurrentPage = PlayerPage.Library;
         }
-        else
+        catch (Exception exception)
         {
-            PlayerBar.LoadTrack(track);
+            // An event handler is an async void boundary: letting this escape would take the whole
+            // window down over a failed stream refresh, so it is reported where the user can see it.
+            PlayerBar.StatusMessage = $"Could not open this track: {exception.Message}";
         }
-
-        CurrentPage = PlayerPage.Library;
     }
 
     /// <summary>
@@ -353,11 +376,19 @@ public partial class MainWindowViewModel : ObservableObject
 
         _refreshedStreamKey = track.StreamKey;
 
-        Track? refreshed = await Bilibili.TryRefreshAsync(track);
-
-        if (refreshed is not null)
+        try
         {
-            PlayerBar.PlayTrack(refreshed);
+            Track? refreshed = await Bilibili.TryRefreshAsync(track);
+
+            if (refreshed is not null)
+            {
+                PlayerBar.PlayTrack(refreshed);
+            }
+        }
+        catch (Exception exception)
+        {
+            // Same boundary rule as above: a failed re-resolve is a status line, not a crash.
+            PlayerBar.StatusMessage = $"Could not refresh this stream: {exception.Message}";
         }
     }
 

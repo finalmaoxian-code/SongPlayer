@@ -24,7 +24,7 @@ namespace SongPlayer.Services.Lyrics;
 /// track from playing.
 /// </para>
 /// </remarks>
-public sealed class CaptionStore
+public sealed class CaptionStore : ICaptionArchive
 {
     /// <summary>
     /// Folder holding one JSON file per archived stream key.
